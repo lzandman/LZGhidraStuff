@@ -1,0 +1,7 @@
+# Known differences of check_self.py on libMethods-x86_64.dylib, compared by test-fixtures.sh.
+# One line per difference, as check_self.py prints it; # lines are comments.
+#
+# Sensor.record gets the right type of self. Only the C text differs: the x86_64 decompiler copies
+# param_1 into a local first (local_14 = param_1; self->reading = local_14;). Ghidra 12.2,
+# Apple Swift 6.4 (swiftlang-6.4.0.34.1).
+Methods.Sensor.record(Swift.Float) -> () (0x1770): C lacks 'self->reading = param_1;'

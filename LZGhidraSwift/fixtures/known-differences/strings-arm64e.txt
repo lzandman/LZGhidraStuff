@@ -1,0 +1,45 @@
+# Known differences of check_report.py on the Strings-arm64e dump, compared by test-fixtures.sh.
+# One line per difference, as check_report.py prints it; # lines are comments.
+#
+# Ghidra 12.2 (as 12.1.4) starts argLengths() and argNonASCII() at the instruction after pacibsp,
+# 4 bytes after their symbols (0xfb8 for _$s7Strings10argLengthsyyF at 0xfb4), so the functions
+# have no Swift name. The analyzer finds all 19 literals, but check_report.py cannot match them to the
+# functions in expected-strings.txt: each is "missing" once and "unexpected" once.
+missing:    argLengths()	""	small
+missing:    argLengths()	"Cb"	small
+missing:    argLengths()	"Sharp"	small
+missing:    argLengths()	"beatTracker"	small
+missing:    argLengths()	"chords"	small
+missing:    argLengths()	"dim"	small
+missing:    argLengths()	"downbeatSnaps"	small
+missing:    argLengths()	"framework"	small
+missing:    argLengths()	"harmonyAnalyzer"	small
+missing:    argLengths()	"loudness"	small
+missing:    argLengths()	"m"	small
+missing:    argLengths()	"maj7"	small
+missing:    argLengths()	"mixolyd"	small
+missing:    argLengths()	"nonBeatBonuses"	small
+missing:    argLengths()	"resultType"	small
+missing:    argLengths()	"tempo_change"	small
+missing:    argNonASCII()	"Füße"	small
+missing:    argNonASCII()	"×"	small
+missing:    argNonASCII()	"é"	small
+unexpected: FUN_00000fb8	""	small
+unexpected: FUN_00000fb8	"Cb"	small
+unexpected: FUN_00000fb8	"Sharp"	small
+unexpected: FUN_00000fb8	"beatTracker"	small
+unexpected: FUN_00000fb8	"chords"	small
+unexpected: FUN_00000fb8	"dim"	small
+unexpected: FUN_00000fb8	"downbeatSnaps"	small
+unexpected: FUN_00000fb8	"framework"	small
+unexpected: FUN_00000fb8	"harmonyAnalyzer"	small
+unexpected: FUN_00000fb8	"loudness"	small
+unexpected: FUN_00000fb8	"m"	small
+unexpected: FUN_00000fb8	"maj7"	small
+unexpected: FUN_00000fb8	"mixolyd"	small
+unexpected: FUN_00000fb8	"nonBeatBonuses"	small
+unexpected: FUN_00000fb8	"resultType"	small
+unexpected: FUN_00000fb8	"tempo_change"	small
+unexpected: FUN_00001158	"Füße"	small
+unexpected: FUN_00001158	"×"	small
+unexpected: FUN_00001158	"é"	small

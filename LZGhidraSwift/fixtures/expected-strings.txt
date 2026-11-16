@@ -1,0 +1,101 @@
+# Swift string literals that the analyzer must find in libStrings.dylib (built with -O, arm64).
+# Checked against otool -tvV of the build from Apple Swift 6.4 (swiftlang-6.4.0.34.1), 2026-10-05.
+# Columns, tab-separated: function (swift demangle --simplified), literal (C escapes), kind.
+# The compiler may merge or move literals; compare by function and literal, not by address.
+# libStrings-Onone.dylib builds every literal through String(_builtinStringLiteral:...) from
+# __cstring, so it must give no small-string hits at all.
+# libStrings-x86_64.dylib (-O, x86_64) is checked against the same list. Known miss there:
+# spelling(_:) "Sharp" and "Flat", whose tag word is computed, (b & 1 | -0x1c) << 56, not a constant.
+# waypointName(_:) (added 2026-10-28) switches through a table of byte offsets; Ghidra 12.2 does not
+# recover it on arm64, so 29 of its 30 literals are known misses there (known-differences/strings.txt).
+
+argLengths()	""	small
+argLengths()	"m"	small
+argLengths()	"Cb"	small
+argLengths()	"dim"	small
+argLengths()	"maj7"	small
+argLengths()	"Sharp"	small
+argLengths()	"chords"	small
+argLengths()	"mixolyd"	small
+argLengths()	"loudness"	small
+argLengths()	"framework"	small
+argLengths()	"resultType"	small
+argLengths()	"beatTracker"	small
+argLengths()	"tempo_change"	small
+argLengths()	"downbeatSnaps"	small
+argLengths()	"nonBeatBonuses"	small
+argLengths()	"harmonyAnalyzer"	small
+argNonASCII()	"é"	small
+argNonASCII()	"×"	small
+argNonASCII()	"Füße"	small
+argLarge()	"0123456789abcdef"	large
+argLarge()	"configuration_key"	large
+argLarge()	"a literal of exactly forty bytes, padded"	large
+argLarge()	"Füße über Hände"	large
+features(_:_:_:_:)	"tempo_change"	small
+features(_:_:_:_:)	"beats"	small
+features(_:_:_:_:)	"attack"	small
+features(_:_:_:_:)	"loudness"	small
+fillBox(_:)	"framework"	small
+chordQuality(_:)	"maj7"	small
+chordQuality(_:)	"sus2"	small
+chordQuality(_:)	"m"	small
+chordQuality(_:)	"dim"	small
+noteName()	"C"	small
+spelling(_:)	"Sharp"	small
+spelling(_:)	"Flat"	small
+accidentalName(_:)	"Flat"	small
+accidentalName(_:)	"Sharp"	small
+accidentalName(_:)	"Natural"	small
+protocol witness for RawRepresentable.rawValue.getter in conformance Accidental	"Flat"	small
+protocol witness for RawRepresentable.rawValue.getter in conformance Accidental	"Sharp"	small
+protocol witness for RawRepresentable.rawValue.getter in conformance Accidental	"Natural"	small
+protocol witness for Hashable.hashValue.getter in conformance Accidental	"Flat"	small
+protocol witness for Hashable.hashValue.getter in conformance Accidental	"Sharp"	small
+protocol witness for Hashable.hashValue.getter in conformance Accidental	"Natural"	small
+protocol witness for Hashable.hash(into:) in conformance Accidental	"Flat"	small
+protocol witness for Hashable.hash(into:) in conformance Accidental	"Sharp"	small
+protocol witness for Hashable.hash(into:) in conformance Accidental	"Natural"	small
+protocol witness for Hashable._rawHashValue(seed:) in conformance Accidental	"Flat"	small
+protocol witness for Hashable._rawHashValue(seed:) in conformance Accidental	"Sharp"	small
+protocol witness for Hashable._rawHashValue(seed:) in conformance Accidental	"Natural"	small
+variable initialization expression of Box.label	""	small
+Box.init()	""	small
+Box.__allocating_init()	""	small
+modelURL()	"chordModel"	small
+modelURL()	"mlmodelc"	small
+waypointName(_:)	"alpha"	small
+waypointName(_:)	"bravo"	small
+waypointName(_:)	"charlie"	small
+waypointName(_:)	"delta"	small
+waypointName(_:)	"echo"	small
+waypointName(_:)	"foxtrot"	small
+waypointName(_:)	"golf"	small
+waypointName(_:)	"hotel"	small
+waypointName(_:)	"india"	small
+waypointName(_:)	"juliett"	small
+waypointName(_:)	"kilo"	small
+waypointName(_:)	"lima"	small
+waypointName(_:)	"mike"	small
+waypointName(_:)	"november"	small
+waypointName(_:)	"oscar"	small
+waypointName(_:)	"papa"	small
+waypointName(_:)	"quebec"	small
+waypointName(_:)	"romeo"	small
+waypointName(_:)	"sierra"	small
+waypointName(_:)	"tango"	small
+waypointName(_:)	"uniform"	small
+waypointName(_:)	"victor"	small
+waypointName(_:)	"whiskey"	small
+waypointName(_:)	"xray"	small
+waypointName(_:)	"yankee"	small
+waypointName(_:)	"zulu"	small
+waypointName(_:)	"one"	small
+waypointName(_:)	"two"	small
+waypointName(_:)	"three"	small
+waypointName(_:)	"four"	small
+
+# Not strings: no hit expected.
+# storeTagLike()	0xE400000000000000 (mov x8, #-0x1c00000000000000), stored to a global
+# divide(_:)	0xAAAAAAAAAAAAAAAB (mov/movk), the magic number of a division by 3
+# storeSimd()	"abcdefgh" bytes and tag; loaded from __literal16 with ldr q0, so not built in code

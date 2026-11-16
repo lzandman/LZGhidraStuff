@@ -1,0 +1,10 @@
+# Known differences of the decompiler check of test-fixtures.sh. One line per failure, as the check
+# prints it; # lines are comments. Ghidra 12.2, Apple Swift 6.4 (swiftlang-6.4.0.34.1).
+#
+# $addTwice at 0x1de8 is the async function pointer of Runtime.addTwice (symbol ...FTu), an 8-byte
+# record in the non-executable __const section, not code. Ghidra's Swift demangler creates a function
+# there on every processor and version, also without this extension: it skips the
+# AsyncFunctionPointer node of the symbol and applies the Function node after it. On arm64 the
+# function decompiles to halt_baddata(). On x86_64 the bytes after it decode as instructions; 12.1.4
+# printed garbage C, 12.2 fails with "Bad instruction count exceeded".
+run/Runtime-x86_64-runtime.txt: $addTwice (0x00001de8): decompiler failed

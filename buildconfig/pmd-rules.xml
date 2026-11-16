@@ -1,0 +1,92 @@
+<?xml version="1.0"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- PMD rules for the LZGhidraStuff extensions (buildconfig/quality.gradle). Whole categories, minus the rules that
+     only flag a style choice or that fire on almost every class of a Ghidra extension. -->
+<ruleset name="LZGhidraStuff"
+	xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0 https://pmd.sourceforge.io/ruleset_2_0_0.xsd">
+	<description>Unused code, likely bugs, needless complexity, slow idioms.</description>
+
+	<rule ref="category/java/bestpractices.xml">
+		<exclude name="UnitTestAssertionsShouldIncludeMessage"/>
+		<exclude name="UnitTestContainsTooManyAsserts"/>
+		<exclude name="UseVarargs"/>
+		<exclude name="SystemPrintln"/>
+		<exclude name="AvoidReassigningParameters"/>
+		<!-- Ghidra's Msg has no log levels to guard. -->
+		<exclude name="GuardLogStatement"/>
+		<exclude name="LiteralsFirstInComparisons"/>
+		<exclude name="LooseCoupling"/>
+		<exclude name="ImplicitFunctionalInterface"/>
+		<exclude name="OnDemandImport"/>
+		<exclude name="OneDeclarationPerLine"/>
+	</rule>
+
+	<rule ref="category/java/errorprone.xml">
+		<exclude name="AvoidLiteralsInIfCondition"/>
+		<exclude name="AvoidDuplicateLiterals"/>
+		<exclude name="AvoidFieldNameMatchingMethodName"/>
+		<exclude name="AvoidFieldNameMatchingTypeName"/>
+		<exclude name="NullAssignment"/>
+		<exclude name="ReturnEmptyCollectionRatherThanNull"/>
+		<exclude name="AssignmentInOperand"/>
+		<!-- Guesses the test framework from the classpath; Ghidra's jars bring JUnit 5, the
+		     tests are JUnit 4 (PMD 7.28). -->
+		<exclude name="WrongTestAnnotation"/>
+		<!-- Ghidra analyzers call setPriority() and friends in their constructors. -->
+		<exclude name="ConstructorCallsOverridableMethod"/>
+		<!-- Error Prone reports these (ReferenceEquality, StringCaseLocaleUsage). -->
+		<exclude name="CompareObjectsWithEquals"/>
+		<exclude name="UseLocaleWithCaseConversions"/>
+		<exclude name="EmptyCatchBlock"/>
+	</rule>
+
+	<!-- An empty catch is fine when a comment says why (unreadable memory: skip the entry). -->
+	<rule ref="category/java/errorprone.xml/EmptyCatchBlock">
+		<properties>
+			<property name="allowCommentedBlocks" value="true"/>
+		</properties>
+	</rule>
+
+	<rule ref="category/java/performance.xml">
+		<exclude name="AvoidInstantiatingObjectsInLoops"/>
+		<exclude name="RedundantFieldInitializer"/>
+	</rule>
+
+	<!-- design: only simplifications and size limits, not the coupling metrics. -->
+	<rule ref="category/java/design.xml/SimplifyBooleanReturns"/>
+	<rule ref="category/java/design.xml/SimplifyBooleanExpressions"/>
+	<rule ref="category/java/design.xml/SimplifiedTernary"/>
+	<rule ref="category/java/design.xml/SimplifyConditional"/>
+	<rule ref="category/java/design.xml/CollapsibleIfStatements"/>
+	<rule ref="category/java/design.xml/UselessOverridingMethod"/>
+	<rule ref="category/java/design.xml/SingularField"/>
+	<rule ref="category/java/design.xml/ImmutableField"/>
+	<rule ref="category/java/design.xml/FinalFieldCouldBeStatic"/>
+	<rule ref="category/java/design.xml/LogicInversion"/>
+	<rule ref="category/java/design.xml/AvoidThrowingNullPointerException"/>
+	<rule ref="category/java/design.xml/CognitiveComplexity">
+		<properties>
+			<property name="reportLevel" value="25"/>
+		</properties>
+	</rule>
+	<rule ref="category/java/design.xml/NcssCount">
+		<properties>
+			<property name="methodReportLevel" value="80"/>
+			<property name="classReportLevel" value="1000"/>
+		</properties>
+	</rule>
+
+	<!-- codestyle: only redundant code. -->
+	<rule ref="category/java/codestyle.xml/UnnecessaryImport"/>
+	<rule ref="category/java/codestyle.xml/UnnecessaryFullyQualifiedName"/>
+	<rule ref="category/java/codestyle.xml/UnnecessaryModifier"/>
+	<rule ref="category/java/codestyle.xml/UnnecessaryReturn"/>
+	<rule ref="category/java/codestyle.xml/VariableCanBeInlined"/>
+	<rule ref="category/java/codestyle.xml/UnnecessaryCast"/>
+	<rule ref="category/java/codestyle.xml/UnnecessaryBoxing"/>
+	<rule ref="category/java/codestyle.xml/UnnecessarySemicolon"/>
+	<rule ref="category/java/codestyle.xml/UselessQualifiedThis"/>
+	<rule ref="category/java/codestyle.xml/IdenticalCatchBranches"/>
+</ruleset>

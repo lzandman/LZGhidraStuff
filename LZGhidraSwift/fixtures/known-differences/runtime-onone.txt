@@ -1,0 +1,14 @@
+# Known differences of check_runtime.py on libRuntime-Onone.dylib (arm64, -Onone), compared by
+# test-fixtures.sh. One line per difference, as check_runtime.py prints it; # lines are comments.
+# The expected file is written for -O. Ghidra 12.2, Apple Swift 6.4 (swiftlang-6.4.0.34.1).
+#
+# With -Onone every access is tracked: the getters pass Tracking (Read|Tracking, Read is 0) and the
+# setters Tracking|Modify, where -O passes Read and Modify. The flags are still printed by name.
+# In the closure the flags of one call go through locals (local_c8 = Tracking;), so that call
+# shows the local.
+Runtime.Counter.value.getter : Swift.Int (0xc10): C lacks ',Read,(void *)0x0);'
+Runtime.Counter.value.setter : Swift.Int (0xc58): C lacks ',Modify,(void *)0x0);'
+Runtime.Store.count.getter : Swift.Int (0x19c4): C lacks ',Read,(void *)0x0);'
+Runtime.Box.item.getter : A (0x12c0): C lacks ',Read,(void *)0x0);'
+closure #1 (A) -> A in Runtime.makeAccumulator<A>(A, (A, A) -> A) -> (A) -> A (0xf58): C lacks ',Read,(void *)0x0);'
+closure #1 (A) -> A in Runtime.makeAccumulator<A>(A, (A, A) -> A) -> (A) -> A (0xf58): C lacks ',Modify,(void *)0x0);'

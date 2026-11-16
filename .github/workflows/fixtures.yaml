@@ -1,0 +1,97 @@
+# Runs LZGhidraSwift's fixture integration test (LZGhidraSwift/devtools/test-fixtures.sh) on a macOS
+# runner: compiles the Swift fixtures, analyses them with headless Ghidra and the extension, and checks
+# the results. Runs only when started by hand (Actions tab, or `gh workflow run fixtures.yaml`): a macOS
+# runner costs more than a Linux one, and release.yaml does not call it.
+# The runner: GitHub's xcode-27 label (arm64, 3 M1 cores, 7 GB RAM, 14 GB SSD), so that the fixtures
+# are compiled with the Xcode major version the known differences were recorded with
+# (fixtures/known-differences/, Xcode 27.0); the job prints the exact versions. macos-26 has Xcode 26.
+# A fixture run peaks at 0.7 GiB resident (M-series Mac, 2026-10-18). Keep the Ghidra version in step
+# with build.yaml.
+name: Swift fixture test (macOS)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fixtures:
+    name: Fixture test (Ghidra ${{ matrix.ghidra }})
+    runs-on: xcode-27
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        ghidra: ["12.2"]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download Ghidra ${{ matrix.ghidra }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/ghidra-zip"
+          gh release download "Ghidra_${{ matrix.ghidra }}_build" \
+            --repo NationalSecurityAgency/ghidra --pattern 'ghidra_*_PUBLIC_*.zip' \
+            --dir "$RUNNER_TEMP/ghidra-zip"
+          unzip -q "$RUNNER_TEMP/ghidra-zip"/*.zip -d "$RUNNER_TEMP/ghidra"
+          install_dir=$(ls -d "$RUNNER_TEMP"/ghidra/ghidra_*)
+          echo "GHIDRA_INSTALL_DIR=$install_dir" >> "$GITHUB_ENV"
+          java_min=$(sed -n 's/^application.java.min=//p' "$install_dir/Ghidra/application.properties")
+          echo "JAVA_MIN=$java_min" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_MIN }}
+
+      # Stays on v5, not v6 or later (closed-source caching under Gradle's Terms of Use); see the
+      # comment in build.yaml before changing it.
+      - uses: gradle/actions/setup-gradle@v5
+        with:
+          gradle-version: "9.8.1"
+
+      # The release zip has native binaries (the decompiler among them) only for Windows and Linux
+      # x86_64; GettingStarted.md, "Building Native Components". Without them every decompilation
+      # fails. Builds decompile, sleigh and lzfse into <module>/build/os/mac_arm_64 (18 s on an
+      # M-series Mac).
+      - name: Build Ghidra's native binaries
+        working-directory: ${{ env.GHIDRA_INSTALL_DIR }}/support/gradle
+        run: gradle buildNatives
+
+      # make -C fixtures runs the x86_64 DumpLayouts under Rosetta. The runner image does not list it.
+      - name: Install Rosetta
+        run: |
+          if arch -x86_64 /usr/bin/true 2>/dev/null; then
+            echo "Rosetta already installed"
+          else
+            sudo softwareupdate --install-rosetta --agree-to-license
+            echo "Rosetta installed"
+          fi
+
+      # Ghidra 12.2's Swift demangler takes $GHIDRA_SWIFT_DEMANGLER, else /usr/bin/swift-demangle,
+      # else /usr/bin/swift (Xcode's shim), and searches no PATH. The last command fails this step if
+      # the shim does not run, before the fixtures are analysed without demangled names.
+      - name: Tool versions
+        # One label per tool; 2>&1 keeps java's stderr in order. sw_vers printed empty fields on the
+        # xcode-27-arm64 image (20261104.0337.1), so uname follows it.
+        run: |
+          echo "== macOS"; sw_vers 2>&1; uname -srm
+          echo "== Xcode"; xcodebuild -version 2>&1
+          echo "== swiftc"; swiftc --version 2>&1
+          echo "== java"; java -version 2>&1
+          echo "== /usr/bin/swift"; /usr/bin/swift --version 2>&1
+
+      - name: Run test-fixtures.sh
+        run: LZGhidraSwift/devtools/test-fixtures.sh
+
+      # The logs, dumps and checker output, also when a check fails.
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: test-fixtures-ghidra-${{ matrix.ghidra }}
+          path: |
+            LZGhidraSwift/build/test-fixtures
+            !LZGhidraSwift/build/test-fixtures/config
+          retention-days: 14

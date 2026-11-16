@@ -1,0 +1,27 @@
+# Build output
+build/
+dist/
+bin/
+.gradle/
+# Editors and OS
+.DS_Store
+*.swp
+.project
+.classpath
+.settings/
+.pyproject
+.antProperties.xml
+*.iml
+.idea/
+# Python
+__pycache__/
+.ruff_cache/
+.venv/
+# Third-party binaries, dumps and Ghidra projects; never commit them.
+out/
+*.gpr
+*.rep/
+*.lock
+# Local Claude Code context
+CLAUDE.local.md
+.claude/settings.local.json

@@ -1,0 +1,30 @@
+# Known differences of check_throws.py on libThrows-Onone.dylib (arm64, -Onone), compared by
+# test-fixtures.sh. One line per difference, as check_throws.py prints it; # lines are comments.
+# The expected file is written for -O. Ghidra 12.2, Apple Swift 6.4 (swiftlang-6.4.0.34.1).
+#
+# No such symbol: -Onone makes no specializations and merges no functions.
+# classify: the result goes through a local (local_90 = 0;), not return 0;.
+# callDouble, callStatic: the one removed block is dead code of -Onone. The Optional tag is tested
+# twice in a row (subs w8, w8, #0x1; b.eq), and the second branch can never be taken.
+# callInout: the stack address is a pointer to a typed local, without a cast ((in_x1,&local_58)).
+# callBig: the closure's target (x1) and the caller's x2 are still in their registers at the call,
+# so they show as extra arguments ((undefined *)local_68,in_x2,param_1,in_x1,in_x2).
+# propagate, callDoubleClosure: since Ghidra 12.2 the error test is inverted and its branches are
+# swapped; the logic is the same. propagate:
+# if ((extraout_x21 != 0) || (_check(_Var2), extraout_x21_00 != 0)), where 12.1.4 printed the
+# == 0 form. callDoubleClosure: if (object == (SwiftError *)0x0). The -O fixtures keep the
+# expected form.
+function signature specialization <Arg[1] = Dead> of Throws.Config.init(size: Swift.Int) throws -> Throws.Config: no such symbol
+function signature specialization <Arg[1] = Dead> of static Throws.Config.standard(Swift.Int) throws -> Throws.Config: no such symbol
+generic specialization <Swift.Int> of Throws.firstMatch<A where A: Swift.Equatable>([A], A) throws -> Swift.Int: no such symbol
+Throws.classify(Swift.Int) -> Swift.Int (0x152c): C lacks 'return 0;'
+Throws.callDouble(Swift.Double) -> Swift.Double (0x18d0): C contains 'Removing unreachable block'
+Throws.callStatic(Swift.Int) -> Swift.Int (0x246c): C contains 'Removing unreachable block'
+Throws.callInout((inout Throws.Pair) throws -> (), Swift.Int) -> Swift.Int (0x2070): C lacks ',(undefined *)&local_'
+Throws.callBig(Swift.Int, (Swift.Int) throws -> Throws.Big) -> Swift.Int (0x2210): C lacks ',param_1);'
+generic specialization <Throws.ParseError> of Throws.genericTyped<A where A: Swift.Error>(Swift.Int, A) throws(A) -> Swift.Int: no such symbol
+function signature specialization <Arg[1] = Dead> of Throws.FileLoader.load(Swift.Int) throws -> Swift.Int: no such symbol
+merged Throws.mergeA(Swift.Int) throws -> Swift.Int: no such symbol
+Throws.propagate(Swift.Int) throws -> Swift.Int (0x1808): C lacks 'extraout_x21 == 0'
+Throws.propagate(Swift.Int) throws -> Swift.Int (0x1808): C lacks 'extraout_x21_00 == 0'
+Throws.callDoubleClosure((Swift.Double) throws -> Swift.Double, Swift.Double) -> Swift.Double (0x2c90): C lacks 'if (object != (SwiftError *)0x0)'

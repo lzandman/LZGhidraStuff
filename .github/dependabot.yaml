@@ -1,0 +1,26 @@
+# Version updates for the build and CI tools. The extension zips contain no third-party code.
+#
+# Not seen by Dependabot, update by hand: PMD and Checkstyle (toolVersion in
+# buildconfig/quality.gradle), gradle-version in the workflows, and Ghidra (CI takes the latest
+# release).
+version: 2
+updates:
+  # Each extension is its own Gradle project (no root settings.gradle), so both are listed.
+  # One grouped pull request: Error Prone and its plugin, and both extensions' copies, move together.
+  - package-ecosystem: gradle
+    directories: ["/LZGhidraGeneric", "/LZGhidraSwift"]
+    schedule:
+      interval: daily
+    groups:
+      gradle:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: daily
+    ignore:
+      # Stays on v5, see the comment in workflows/build.yaml. Dependabot names the dependency
+      # after the repository (gradle/actions), not the action path (gradle/actions/setup-gradle).
+      - dependency-name: gradle/actions
+        update-types: ["version-update:semver-major"]

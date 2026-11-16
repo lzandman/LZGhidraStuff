@@ -1,0 +1,76 @@
+# Swift Self Types on libMethods.dylib (fixtures/Methods.swift), checked by check_self.py.
+# Tab-separated: the function (demangled, as `swift demangle --compact` prints it), the type of
+# self (the data type's name) or - for a function that must not get self, then text that the
+# decompiled C must contain (any number of columns). Every function with self must be listed.
+#
+# Struct: mutating methods, setters and _modify get self in x20; getters, non-mutating and
+# static methods and the initializer do not. Two getters share their code (identical code
+# folding, a bare ret), as do Engine.name.modify and Sensor.reading.modify: not typed.
+Methods.Gauge.raise(by: Swift.Int) -> ()	Gauge	(__int64 by,Gauge *self)	self->level	self->limit
+Methods.Gauge.rescale(Swift.Double) -> ()	Gauge	self->scale = param_1 * self->scale
+Methods.Gauge.scaled() -> Swift.Double	-
+static Methods.Gauge.make(level: Swift.Int) -> Methods.Gauge	-
+Methods.Gauge.init() -> Methods.Gauge	-
+Methods.Gauge.level.getter : Swift.Int	-
+Methods.Gauge.level.setter : Swift.Int	Gauge
+Methods.Gauge.level.modify : Swift.Int	Gauge
+Methods.Gauge.scale.getter : Swift.Double	-
+Methods.Gauge.scale.setter : Swift.Double	Gauge
+Methods.Gauge.scale.modify : Swift.Double	Gauge
+Methods.Gauge.limit.getter : Swift.Int32	-
+Methods.Gauge.limit.setter : Swift.Int32	Gauge
+Methods.Gauge.limit.modify : Swift.Int32	Gauge
+Methods.Gauge.doubled.getter : Swift.Int	-
+Methods.Gauge.doubled.setter : Swift.Int	Gauge	self->level = param_1 / 2
+Methods.Gauge.doubled.modify : Swift.Int	Gauge
+# Enum without payload: the mutating method only.
+Methods.Phase.advance() -> ()	Phase	(Phase *self	*self == idle
+Methods.Phase.hash(into: inout Swift.Hasher) -> ()	-
+Methods.Phase.hashValue.getter : Swift.Int	-
+static Methods.Phase.allCases.getter : [Methods.Phase]	-
+# Class: method table (accessors and methods), symbols (final method, init, deinit); the
+# allocating init gets the metatype in x20, the class's metadata, typed Metadata *.
+Methods.Engine.name.getter : Swift.String	Engine	get_name(Engine *self)
+Methods.Engine.name.setter : Swift.String	Engine
+Methods.Engine.name.modify : Swift.String	-
+Methods.Engine.speed.getter : Swift.Double	Engine	get_speed(Engine *self)	return self->speed;
+Methods.Engine.speed.setter : Swift.Double	Engine
+Methods.Engine.speed.modify : Swift.Double	Engine
+Methods.Engine.gauge.getter : Methods.Gauge	Engine
+Methods.Engine.gauge.setter : Methods.Gauge	Engine
+Methods.Engine.gauge.modify : Methods.Gauge	Engine
+Methods.Engine.phase.getter : Methods.Phase	Engine
+Methods.Engine.phase.setter : Methods.Phase	Engine	self->phase = param_1;
+Methods.Engine.phase.modify : Methods.Phase	Engine
+Methods.Engine.accelerate(Swift.Double) -> ()	Engine	(double param_1,Engine *self)
+Methods.Engine.stop() -> ()	Engine	stop(Engine *self)
+Methods.Engine.describe() -> Swift.Double	Engine	describe(Engine *self)
+Methods.Engine.init() -> Methods.Engine	Engine	self->speed = 0.0;	(self->gauge).scale = 1.0;
+Methods.Engine.__allocating_init() -> Methods.Engine	Metadata	_swift_allocObject(self,
+Methods.Engine.deinit	Engine
+Methods.Engine.__deallocating_deinit	Engine
+# Subclass: an override (override table) and a new method; the superclass is embedded as super.
+Methods.TurboEngine.accelerate(Swift.Double) -> ()	TurboEngine	TurboEngine *self
+Methods.TurboEngine.spool(Swift.Int) -> ()	TurboEngine	(__int64 param_1,TurboEngine *self)
+Methods.TurboEngine.boost.getter : Swift.Double	TurboEngine	return self->boost;
+Methods.TurboEngine.boost.setter : Swift.Double	TurboEngine
+Methods.TurboEngine.boost.modify : Swift.Double	TurboEngine
+Methods.TurboEngine.spins.getter : Swift.Int	TurboEngine
+Methods.TurboEngine.spins.setter : Swift.Int	TurboEngine
+Methods.TurboEngine.spins.modify : Swift.Int	TurboEngine
+Methods.TurboEngine.init() -> Methods.TurboEngine	TurboEngine
+Methods.TurboEngine.__allocating_init() -> Methods.TurboEngine	Metadata
+Methods.TurboEngine.deinit	TurboEngine	(self->super).name.object
+Methods.TurboEngine.__deallocating_deinit	TurboEngine
+# Final class: no method table; everything from symbols.
+Methods.Sensor.record(Swift.Float) -> ()	Sensor	self->reading = param_1;	self->count + 1
+Methods.Sensor.reading.getter : Swift.Float	Sensor
+Methods.Sensor.reading.setter : Swift.Float	Sensor
+Methods.Sensor.reading.modify : Swift.Float	-
+Methods.Sensor.count.getter : Swift.Int	Sensor
+Methods.Sensor.count.setter : Swift.Int	Sensor
+Methods.Sensor.count.modify : Swift.Int	Sensor
+Methods.Sensor.init() -> Methods.Sensor	Sensor
+Methods.Sensor.__allocating_init() -> Methods.Sensor	Metadata
+Methods.Sensor.deinit	Sensor
+Methods.Sensor.__deallocating_deinit	Sensor

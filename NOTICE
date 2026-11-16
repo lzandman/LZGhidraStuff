@@ -1,0 +1,18 @@
+LZGhidraStuff
+Copyright (c) 2026 Leon Zandman
+
+Licensed under the Apache License, Version 2.0 (see LICENSE). Two files come from other
+Apache-2.0 projects.
+
+buildconfig/GhidraEclipseFormatter.xml is Ghidra's Eclipse formatter profile, copied
+unchanged from https://github.com/NationalSecurityAgency/ghidra
+(ghidra/eclipse/GhidraEclipseFormatter.xml), licensed under the Apache License 2.0. It is a
+development tool (the Spotless formatting check) and is not part of any extension zip.
+
+LZGhidraSwift/data/swift-runtime-functions.txt is derived from the Swift source
+(https://github.com/swiftlang/swift: include/swift/Runtime/RuntimeFunctions.def, the
+runtime headers in include/swift/Runtime and include/swift/ABI), by
+LZGhidraSwift/devtools/gen_runtime_functions.py. Its header line names the Swift commit.
+The Swift source is Copyright (c) Apple Inc. and the Swift project authors, licensed under
+the Apache License 2.0 with Runtime Library Exception (https://swift.org/LICENSE.txt). The
+file and this NOTICE are part of the LZGhidraSwift extension zip.

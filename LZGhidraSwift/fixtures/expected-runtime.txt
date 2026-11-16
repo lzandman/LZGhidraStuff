@@ -1,0 +1,73 @@
+# Expected result of Swift Runtime Prototypes on libRuntime.dylib (arm64 -O, x86_64, arm64e; arm64
+# -Onone, with the known differences in known-differences/runtime-onone.txt), for check_runtime.py.
+# Rows, tab-separated:
+#   ext   external function, signature source, calling convention, prototype as Ghidra prints it
+#         (a leading "?": only if the binary imports it). Every _swift_ external must have a row.
+#   func  function (swift demangle --compact of its symbol), then texts that its decompiled C must
+#         contain, or must not contain with a leading "!".
+
+# The runtime functions the fixture imports. C_CC functions get "default", the program's default
+# convention, which is the C one (__cdecl on AArch64, __stdcall on x86_64). SwiftCC ones get
+# __swift_stdcall.
+ext	_swift_allocBox	ANALYSIS	__swift_stdcall	BoxPair _swift_allocBox(Metadata * type)
+ext	_swift_allocObject	ANALYSIS	default	HeapObject * _swift_allocObject(Metadata * metadata, size_t requiredSize, size_t requiredAlignmentMask)
+ext	_swift_allocateGenericClassMetadata	ANALYSIS	default	Metadata * _swift_allocateGenericClassMetadata(TypeContextDescriptor * description, void * * arguments, void * pattern)
+ext	_swift_allocateGenericValueMetadata	ANALYSIS	default	Metadata * _swift_allocateGenericValueMetadata(TypeContextDescriptor * description, void * * arguments, void * pattern, size_t extraDataSize)
+ext	_swift_beginAccess	ANALYSIS	default	void _swift_beginAccess(void * pointer, ValueBuffer * buffer, ExclusivityFlags flags, void * pc)
+ext	_swift_bridgeObjectRelease	ANALYSIS	default	void _swift_bridgeObjectRelease(BridgeObject * value)
+ext	_swift_bridgeObjectRetain	ANALYSIS	default	BridgeObject * _swift_bridgeObjectRetain(BridgeObject * value)
+ext	_swift_checkMetadataState	ANALYSIS	__swift_stdcall	MetadataResponse _swift_checkMetadataState(size_t request, Metadata * type)
+ext	_swift_deallocClassInstance	ANALYSIS	default	void _swift_deallocClassInstance(HeapObject * object, size_t allocatedSize, size_t allocatedAlignMask)
+ext	_swift_deallocObject	ANALYSIS	default	void _swift_deallocObject(HeapObject * object, size_t allocatedSize, size_t allocatedAlignMask)
+ext	_swift_defaultActor_deallocate	ANALYSIS	__swift_stdcall	void _swift_defaultActor_deallocate(HeapObject * actor)
+ext	_swift_defaultActor_destroy	ANALYSIS	__swift_stdcall	void _swift_defaultActor_destroy(HeapObject * actor)
+ext	_swift_defaultActor_initialize	ANALYSIS	__swift_stdcall	void _swift_defaultActor_initialize(HeapObject * actor)
+ext	_swift_dynamicCast	ANALYSIS	default	bool _swift_dynamicCast(OpaqueValue * dest, OpaqueValue * src, Metadata * srcType, Metadata * targetType, DynamicCastFlags flags)
+ext	_swift_endAccess	ANALYSIS	default	void _swift_endAccess(ValueBuffer * buffer)
+ext	_swift_getGenericMetadata	ANALYSIS	__swift_stdcall	MetadataResponse _swift_getGenericMetadata(size_t request, void * arguments, TypeContextDescriptor * description)
+ext	_swift_initClassMetadata2	ANALYSIS	__swift_stdcall	MetadataDependency _swift_initClassMetadata2(Metadata * self, ClassLayoutFlags flags, size_t numFields, void * fieldTypes, void * fieldOffsets)
+ext	_swift_once	ANALYSIS	default	void _swift_once(void * predicate, void * fn)
+ext	_swift_projectBox	ANALYSIS	default	OpaqueValue * _swift_projectBox(HeapObject * object)
+ext	_swift_release	ANALYSIS	default	void _swift_release(HeapObject * object)
+ext	_swift_retain	ANALYSIS	default	HeapObject * _swift_retain(HeapObject * object)
+# arm64 imports the 2 variant, x86_64 and arm64e the other one. The header declares neither, so the
+# parameters have Ghidra's names.
+ext	?_swift_getTypeByMangledNameInContext2	ANALYSIS	__swift_stdcall	Metadata * _swift_getTypeByMangledNameInContext2(void * param_1, size_t param_2, TypeContextDescriptor * param_3, void * * param_4)
+ext	?_swift_getTypeByMangledNameInContext	ANALYSIS	__swift_stdcall	Metadata * _swift_getTypeByMangledNameInContext(void * param_1, size_t param_2, TypeContextDescriptor * param_3, void * * param_4)
+# Left alone: an async function (SwiftAsyncCC), and functions of other modules (malloc keeps the
+# prototype of Ghidra's archive).
+ext	_swift_task_switch	DEFAULT	unknown	undefined _swift_task_switch()
+ext	_malloc	IMPORTED	unknown	void * _malloc(size_t param_1)
+ext	_objc_opt_self	DEFAULT	unknown	undefined _objc_opt_self()
+
+# swift_beginAccess: the ValueBuffer on the stack and ExclusivityFlags by name. With -O the getter
+# and setter accesses are not tracked (Read, Modify; no swift_endAccess), the modify coroutine's is
+# (Tracking|Modify). With -Onone all are tracked.
+func	Runtime.Counter.value.getter : Swift.Int	ValueBuffer 	_swift_beginAccess(&self->value,&	,Read,(void *)0x0);	!Some values do not have unique names
+func	Runtime.Counter.value.setter : Swift.Int	ValueBuffer 	_swift_beginAccess(&self->value,&	,Modify,(void *)0x0);
+func	Runtime.Counter.value.modify : Swift.Int	_swift_beginAccess(&self->value,(ValueBuffer *)param_1,Tracking|Modify,(void *)0x0);
+func	Runtime.Store.count.getter : Swift.Int	_swift_beginAccess(&self->count,&	,Read,(void *)0x0);
+func	Runtime.Box.item.getter : A	ValueBuffer 	,Read,(void *)0x0);
+func	Runtime.Box.item.setter : A	ValueBuffer 	,Tracking|Modify,(void *)0x0);	_swift_endAccess(&
+func	Runtime.Box.item.modify : A	,param_2,Tracking|Modify,(void *)0x0);
+func	Runtime.Box.item.modify : A with unmangled suffix ".resume.0"	_swift_endAccess(param_2);
+# The boxed var of the closure.
+func	closure #1 (A) -> A in Runtime.makeAccumulator<A>(A, (A, A) -> A) -> (A) -> A	= _swift_projectBox(	,Read,(void *)0x0);	,Modify,(void *)0x0);
+# The closure calls ___chkstk_darwin twice before it reads the box, which is in x1 (x0 with -Onone).
+# On arm64 the calls go through __got and get the stack probe override, so the box stays the
+# parameter it is, and the buffer size in x8 stays a value of the caller. x86_64 calls a stub.
+func	closure #1 (A) -> A in Runtime.makeAccumulator<A>(A, (A, A) -> A) -> (A) -> A	_swift_projectBox(param_	!extraout_x8
+# swift_allocBox returns the box and the address of its value: both fields are used.
+func	Runtime.makeAccumulator<A>(A, (A, A) -> A) -> (A) -> A	BoxPair 	= _swift_allocBox(	.buffer,	.object;	= _swift_allocObject((Metadata *)
+func	Runtime.makeTree<A>(A, A) -> Runtime.Tree<A>	BoxPair 	= _swift_allocBox(	.object;
+# Swift Self Types types the metatype in x20 as Metadata *self, so the call needs no cast.
+func	Runtime.Box.__allocating_init(A) -> Runtime.Box<A>	= _swift_allocObject(self,
+# DynamicCastFlags 6.
+func	Runtime.nameOf(Any) -> Swift.String?	= _swift_dynamicCast(	DestroyOnFailure|TakeOnSuccess)
+# MetadataResponse and MetadataDependency, ClassLayoutFlags.
+func	type metadata completion function for Runtime.Box	MetadataResponse 	= _swift_checkMetadataState(0x13f,	MetadataDependency 	= _swift_initClassMetadata2(	Swift5Algorithm	.value == (Metadata *)0x0
+func	Runtime.Store.init() -> Runtime.Store	_swift_defaultActor_initialize((HeapObject *)
+# swift_once without its context parameter (the generator's UNDEFINED_ARGS): the addressor leaves
+# x2 unset. With the context, the decompiler reads x2 as an input: in_x2 here (the symbol gives the
+# addressor a signature), extra parameters in a function without a symbol.
+func	Runtime.processID.unsafeMutableAddressor : Swift.Int	(void)	_swift_once(&	!in_x2	!param_

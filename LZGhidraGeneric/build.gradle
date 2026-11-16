@@ -1,0 +1,70 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Leon Zandman
+
+// Builds the extension for the Ghidra installation in GHIDRA_INSTALL_DIR (environment variable
+// or -PGHIDRA_INSTALL_DIR=...). Derived from Ghidra's Extensions/Ghidra/Skeleton/buildTemplate.gradle.
+
+// Code quality checks (gradle lint), configured in ../buildconfig/quality.gradle.
+plugins {
+	id 'pmd'
+	id 'checkstyle'
+	id 'com.diffplug.spotless' version '8.10.4'
+	id 'net.ltgt.errorprone' version '5.1.1'
+}
+
+//----------------------START "DO NOT MODIFY" SECTION------------------------------
+def ghidraInstallDir
+
+if (System.env.GHIDRA_INSTALL_DIR) {
+	ghidraInstallDir = System.env.GHIDRA_INSTALL_DIR
+}
+else if (project.hasProperty("GHIDRA_INSTALL_DIR")) {
+	ghidraInstallDir = project.getProperty("GHIDRA_INSTALL_DIR")
+}
+else {
+	ghidraInstallDir = "<REPLACE>"
+}
+
+task distributeExtension {
+	group = "Ghidra"
+
+	apply from: new File(ghidraInstallDir).getCanonicalPath() + "/support/buildExtension.gradle"
+	dependsOn ':buildExtension'
+}
+//----------------------END "DO NOT MODIFY" SECTION-------------------------------
+
+// Unit tests (gradle test): JUnit 4 from the local Maven repository or Maven Central.
+repositories {
+	mavenLocal()
+	mavenCentral()
+}
+dependencies {
+	testImplementation 'junit:junit:4.13.2'
+}
+
+buildExtension.exclude 'README.md'
+buildExtension.exclude 'CLAUDE.md'
+buildExtension.exclude 'devtools/**'
+buildExtension.exclude '.idea/**'
+
+// The Apache License asks for its text and the NOTICE file in every copy, so both go into the
+// zip, next to extension.properties.
+buildExtension.from('../LICENSE') {
+	into project.name
+}
+
+buildExtension.from('../NOTICE') {
+	into project.name
+}
+
+// Release number at the end of the description, which Ghidra's Install Extensions dialog shows.
+// The version field cannot hold it: Ghidra fills it with its own version and compares it on install.
+// build.yaml sets lzRelease (ORG_GRADLE_PROJECT_lzRelease) to the tag, or to dev-<commit> in a run
+// without a tag; local builds say "dev".
+def lzRelease = project.findProperty('lzRelease') ?: 'dev'
+buildExtension.inputs.property('lzRelease', lzRelease)
+buildExtension.filesMatching('**/extension.properties') {
+	filter { line -> line.replace('@lzrelease@', lzRelease) }
+}
+
+apply from: '../buildconfig/quality.gradle'

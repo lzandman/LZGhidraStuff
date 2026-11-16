@@ -1,0 +1,84 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Leon Zandman
+
+// Code quality checks shared by the extensions. None of them is part of buildExtension.
+//
+//   gradle lint            all checks below; fails on any finding
+//   gradle spotlessApply   formats the Java sources (Ghidra's Eclipse profile)
+//   gradle -Pstrict ...    javac and Error Prone warnings fail the compile (-Werror)
+//
+// Applied from an extension's build.gradle with: apply from: '../buildconfig/quality.gradle'.
+// The configuration files are found next to this script; sources are relative to the extension.
+//
+// Reports: build/reports/{pmd,checkstyle}/. Compiler and Error Prone findings go to the console.
+
+// javac's own warnings. -processing: no annotation processors; -serial: Ghidra's Swing base
+// classes are Serializable, which says nothing about this code; -this-escape: Ghidra analyzers
+// call setPriority() and friends in their constructors.
+// The folder of this script, which also holds the PMD, Checkstyle and formatter files.
+def configDir = buildscript.sourceFile.parentFile
+
+tasks.withType(JavaCompile).configureEach {
+	options.compilerArgs += ['-Xlint:all,-processing,-serial,-this-escape']
+	if (project.hasProperty('strict')) {
+		options.compilerArgs += ['-Werror']
+	}
+	options.errorprone {
+		disableWarningsInGeneratedCode = true
+	}
+}
+
+// Error Prone: bug patterns at compile time (https://errorprone.info/bugpatterns).
+dependencies {
+	errorprone 'com.google.errorprone:error_prone_core:2.50.0'
+}
+
+// Formatting with Ghidra's own Eclipse profile (tabs, 100 columns), so the code reads like Ghidra's.
+// Imports: static, then java and javax, then org and com, then the rest (ghidra and the
+// extension's own packages) in one block; each group sorted.
+spotless {
+	java {
+		target 'src/**/*.java', 'ghidra_scripts/**/*.java', 'devtools/ghidra_scripts/**/*.java',
+			'../devtools/ghidra_scripts/**/*.java'
+		eclipse().configFile(new File(configDir, 'GhidraEclipseFormatter.xml'))
+		importOrder('\\#', 'java|javax', 'org|com', '')
+	}
+}
+
+// PMD: unused code, complexity, simplifications. Rule selection in pmd-rules.xml.
+pmd {
+	toolVersion = '7.28.0'
+	ruleSets = []
+	ruleSetFiles = files(new File(configDir, 'pmd-rules.xml'))
+	consoleOutput = true
+}
+
+// PMD resolves JDK types through its auxiliary classpath. Without the JDK's classes there, it adds
+// those of the JVM it runs on and warns once per task. Pass that JDK's jrt-fs.jar explicitly, and
+// stop when it is not the Java version Ghidra compiles for (application.java.compiler): PMD would
+// check the code against another version's library. Set JAVA_HOME (devtools/java-home.sh).
+def gradleJdk = System.getProperty('java.home')
+tasks.withType(Pmd).configureEach {
+	classpath = classpath + files("${gradleJdk}/lib/jrt-fs.jar")
+	def compilerVersion = tasks.named('compileJava').get().sourceCompatibility
+	doFirst {
+		if (JavaVersion.current() != JavaVersion.toVersion(compilerVersion)) {
+			throw new GradleException("PMD runs on Java ${JavaVersion.current()} (${gradleJdk}), "
+				+ "Ghidra compiles for Java ${compilerVersion}: set JAVA_HOME to a JDK ${compilerVersion}")
+		}
+	}
+}
+
+// Checkstyle: only Javadoc presence and form, see checkstyle.xml. Not on tests.
+checkstyle {
+	toolVersion = '14.3.0'
+	configFile = new File(configDir, 'checkstyle.xml')
+	maxWarnings = 0
+}
+checkstyleTest.enabled = false
+
+tasks.register('lint') {
+	group = 'verification'
+	description = 'Runs javac -Xlint, Error Prone, Spotless, PMD and Checkstyle.'
+	dependsOn 'compileJava', 'compileTestJava', 'spotlessCheck', 'pmdMain', 'pmdTest', 'checkstyleMain'
+}

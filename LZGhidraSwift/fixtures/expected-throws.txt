@@ -1,0 +1,107 @@
+# Expected result of Swift Error Register on libThrows.dylib (arm64 and x86_64, both also
+# stripped; arm64e; arm64 -Onone, with the known differences in known-differences/throws-onone.txt),
+# for check_throws.py.
+# Columns, tab-separated: the function (swift demangle --compact of its symbol); "throws" if it
+# must have a throwing calling convention (name ending in _throws), "-" if not; then texts that its
+# decompiled C must contain, or must not contain with a leading "!". $ERR stands for the error
+# register: x21 (arm64) or R12 (x86_64). Every function with a throwing convention in the dump must
+# be listed here.
+# A caller that passes the error to swift_errorRelease shows the error register as "object", of type
+# SwiftError *: Swift Runtime Prototypes gives swift_errorRelease the signature
+# void swift_errorRelease(SwiftError *object), and the decompiler names the register after that
+# parameter. Other callers keep extraout_$ERR.
+
+# Throwing functions, also the specialized copies that the callers call.
+Throws.mayThrow(Swift.Int) throws -> Swift.Int	throws
+Throws.mayThrowDouble(Swift.Double) throws -> Swift.Double	throws
+Throws.check(Swift.Int) throws -> ()	throws
+Throws.Parser.parse(Swift.Int) throws -> Swift.Int	throws
+Throws.Config.init(size: Swift.Int) throws -> Throws.Config	throws
+function signature specialization <Arg[1] = Dead> of Throws.Config.init(size: Swift.Int) throws -> Throws.Config	throws
+static Throws.Config.standard(Swift.Int) throws -> Throws.Config	throws
+function signature specialization <Arg[1] = Dead> of static Throws.Config.standard(Swift.Int) throws -> Throws.Config	throws
+Throws.firstMatch<A where A: Swift.Equatable>([A], A) throws -> Swift.Int	throws
+generic specialization <Swift.Int> of Throws.firstMatch<A where A: Swift.Equatable>([A], A) throws -> Swift.Int	throws
+# A throwing caller tests the error of each call.
+Throws.propagate(Swift.Int) throws -> Swift.Int	throws	!Removing unreachable block	extraout_$ERR == 0	extraout_$ERR_00 == 0
+
+# Typed throws: the same convention (x21 is a flag, the error in the result registers or in a
+# buffer the caller passes).
+Throws.typedThrow(Swift.Int) throws(Throws.ParseError) -> Swift.Int	throws
+Throws.typedPair(Swift.Int) throws(Throws.Span) -> Swift.Int	throws
+Throws.typedVoid(Swift.Int) throws(Throws.ParseError) -> ()	throws
+Throws.typedLarge(Swift.Int) throws(Throws.Overflow) -> Swift.Int	throws
+
+# Callers keep their catch path: the error is the register after the call.
+Throws.callThrowing(Swift.Int) -> Swift.Int	-	!Removing unreachable block	if (object != (SwiftError *)0x0)	_swift_errorRelease(object);	= -1;
+Throws.classify(Swift.Int) -> Swift.Int	-	!Removing unreachable block	if (object != (SwiftError *)0x0)	&__type_metadata_for_Throws_ParseError	&__type_metadata_for_Throws_Failure	+ 100;	return 0;
+Throws.optionalTry(Swift.Int) -> Swift.Int?	-	!Removing unreachable block	if (object != (SwiftError *)0x0)	object != (SwiftError *)0x0;
+Throws.callDouble(Swift.Double) -> Swift.Double	-	!Removing unreachable block	if (object != (SwiftError *)0x0)	= -1.5;
+Throws.callMethod(Throws.Parser, Swift.Int) -> Swift.Int	-	!Removing unreachable block	if (object != (SwiftError *)0x0)	= -2;
+Throws.callInit(Swift.Int) -> Swift.Int	-	!Removing unreachable block	if (object != (SwiftError *)0x0)	= -4;
+Throws.callStatic(Swift.Int) -> Swift.Int	-	!Removing unreachable block	if (object != (SwiftError *)0x0)	= -5;
+Throws.callGeneric([Swift.Int]) -> Swift.Int	-	!Removing unreachable block	if (object != (SwiftError *)0x0)	= -6;
+# An indirect call to a throwing closure: a call-site override with the throwing variant, whose
+# parameters are the registers the caller sets: the closure's context first (x20, r13), then x0
+# (rdi).
+Throws.callClosure((Swift.Int) throws -> Swift.Int, Swift.Int) -> Swift.Int	-	!Removing unreachable block	if (object != (SwiftError *)0x0)	= -3;	)(in_
+# The address of the inout struct on the stack is an argument, so the struct is read after the call.
+Throws.callInout((inout Throws.Pair) throws -> (), Swift.Int) -> Swift.Int	-	!Removing unreachable block	object == (SwiftError *)0x0	,(undefined *)&local_	* 3 +	= -8;
+# The buffer of the indirect result (x8, rax) is the first argument; x0 (rdi) is the caller's own
+# first parameter, passed on.
+Throws.callBig(Swift.Int, (Swift.Int) throws -> Throws.Big) -> Swift.Int	-	!Removing unreachable block	object == (SwiftError *)0x0	((undefined *)local_	,param_1);	= -9;
+# The catch returns error.code, which is in x0 (rax) on both paths: the compiler dropped the test.
+Throws.callTyped(Swift.Int) -> Swift.Int	-	!extraout_$ERR
+# Callers of typed throws test the flag with a conditional select. The second word of the error is
+# in x1 (rdx), the error of a Void function in x0 (rax): result registers that the call kills.
+Throws.callTypedPair(Swift.Int) -> Swift.Int	-	!Removing unreachable block	if (extraout_$ERR != 0)	* 3 + extraout_
+Throws.callTypedVoid(Swift.Int) -> Swift.Int	-	!Removing unreachable block	extraout_$ERR	= _typedVoid(param_1);	+ 1000;
+# The error of five words is in a buffer on the caller's stack, which the signature does not show.
+Throws.callTypedLarge(Swift.Int) -> Swift.Int	-	!Removing unreachable block	if (extraout_$ERR != 0)	* 5 +
+
+# Internal throwing functions: local symbols in libThrows.dylib; in the stripped copies found from
+# their callers (callHidden sets the error register to 0, hiddenPropagate passes its own on).
+Throws.hiddenThrow(Swift.Int) throws -> Swift.Int	throws
+Throws.hiddenPropagate(Swift.Int) throws -> Swift.Int	throws	!Removing unreachable block
+Throws.callHidden(Swift.Int) -> Swift.Int	-	!Removing unreachable block	if (object != (SwiftError *)0x0)	= -7;
+# A hidden typed throw; in the stripped copies found from its caller's conditional select.
+Throws.hiddenTyped(Swift.Int) throws(Throws.ParseError) -> Swift.Int	throws
+Throws.callHiddenTyped(Swift.Int) -> Swift.Int	-	!Removing unreachable block	if (extraout_$ERR != 0)	* 7;
+
+# Typed throws with an indirect result (x8, rax): the caller keeps its test. The error buffer it
+# passes (x1, rsi) is not in the signature, so the catch reads an uninitialized-looking local.
+Throws.typedBig(Swift.Int) throws(Throws.ParseError) -> Throws.Big	throws
+Throws.callTypedBig(Swift.Int) -> Swift.Int	-	!Removing unreachable block	extraout_$ERR == 0	_typedBig(&local_
+# A generic error type; the caller calls the specialization.
+Throws.genericTyped<A where A: Swift.Error>(Swift.Int, A) throws(A) -> Swift.Int	throws
+generic specialization <Throws.ParseError> of Throws.genericTyped<A where A: Swift.Error>(Swift.Int, A) throws(A) -> Swift.Int	throws
+Throws.callGenericTyped(Swift.Int) -> Swift.Int	-	!Removing unreachable block	if (extraout_$ERR != 0)	+ 0x32;
+
+# Closures: the Double result is the one the call returns (extraout_d0, extraout_XMM0_Qa), not
+# the caller's argument; the String result's second word is in x1 (rdx); ten arguments, the last
+# two (four) on the stack.
+Throws.callDoubleClosure((Swift.Double) throws -> Swift.Double, Swift.Double) -> Swift.Double	-	!Removing unreachable block	if (object != (SwiftError *)0x0)	= extraout_	= -11.5;
+Throws.callStringClosure((Swift.Int) throws -> Swift.String, Swift.Int) -> Swift.Int	-	!Removing unreachable block	object == (SwiftError *)0x0	_swift_bridgeObjectRelease(value);	_swift_errorRelease(object);
+Throws.callManyArgs((Swift.Int, Swift.Int, Swift.Int, Swift.Int, Swift.Int, Swift.Int, Swift.Int, Swift.Int, Swift.Int, Swift.Int) throws -> Swift.Int, Swift.Int) -> Swift.Int	-	!Removing unreachable block	if (object != (SwiftError *)0x0)	+ 8,	+ 9);	= -0xd;
+# self in x20 (r13) for bump(), then the closure's context.
+Throws.Holder.callWith((Swift.Int) throws -> Swift.Int) -> Swift.Int	-	!Removing unreachable block	if (object != (SwiftError *)0x0)	)(in_	= -0xe;
+
+# A throwing protocol requirement: the witness thunk throws; the callers call the witness through
+# the witness table, with self as the context.
+Throws.FileLoader.load(Swift.Int) throws -> Swift.Int	throws
+function signature specialization <Arg[1] = Dead> of Throws.FileLoader.load(Swift.Int) throws -> Swift.Int	throws
+protocol witness for Throws.Loader.load(Swift.Int) throws -> Swift.Int in conformance Throws.FileLoader : Throws.Loader in Throws	throws
+Throws.callWitness<A where A: Throws.Loader>(A, Swift.Int) -> Swift.Int	-	!Removing unreachable block	if (object != (SwiftError *)0x0)	(param_4 + 8))(param_1,	= -0xf;
+Throws.callExistential(Throws.Loader, Swift.Int) -> Swift.Int	-	!Removing unreachable block	if (object != (SwiftError *)0x0)	+ 8))(	= -0x10;
+
+# Merged copies: both entry points and the merged body (symbol ...Tm) throw.
+Throws.mergeA(Swift.Int) throws -> Swift.Int	throws
+Throws.mergeB(Swift.Int) throws -> Swift.Int	throws
+merged Throws.mergeA(Swift.Int) throws -> Swift.Int	throws
+
+# Async: not changed. The error goes to the continuation in x20 (r13), whose test of its entry
+# value the decompiler keeps. No C texts: the partial functions have local symbols (no C in the
+# stripped dumps), and on arm64e the decompiler removes their pointer authentication traps.
+Throws.asyncThrow(Swift.Int) async throws -> Swift.Int	-
+Throws.asyncTyped(Swift.Int) async throws(Throws.ParseError) -> Swift.Int	-
+(1) await resume partial function for Throws.callAsync(Swift.Int) async -> Swift.Int	-

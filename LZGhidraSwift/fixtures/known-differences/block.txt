@@ -1,0 +1,67 @@
+# Known differences of check_report.py with the String block on the Strings dump, compared by test-fixtures.sh.
+# One line per difference, as the checker prints it; # lines are comments.
+#
+# waypointName(_:) switches through a table of byte offsets (and x8, x0, #0xff; ldrb; add lsl 2;
+# br) with no bound but the mask. Ghidra 12.2 does not recover that jump table ("Too many branches";
+# 12.1.4 did, reading all 256 bytes), so the 29 cases after the branch are not in the function and
+# the analyzer does not see them; "alpha", set before the branch, is found. A Ghidra regression,
+# GP-7003 (JumpBasic::findSmallestNormal); this file shows when a fix lands. Apple Swift 6.4.
+# The block lacks the same 29 strings.
+block missing:    "bravo"
+block missing:    "charlie"
+block missing:    "delta"
+block missing:    "echo"
+block missing:    "four"
+block missing:    "foxtrot"
+block missing:    "golf"
+block missing:    "hotel"
+block missing:    "india"
+block missing:    "juliett"
+block missing:    "kilo"
+block missing:    "lima"
+block missing:    "mike"
+block missing:    "november"
+block missing:    "one"
+block missing:    "oscar"
+block missing:    "papa"
+block missing:    "quebec"
+block missing:    "romeo"
+block missing:    "sierra"
+block missing:    "tango"
+block missing:    "three"
+block missing:    "two"
+block missing:    "uniform"
+block missing:    "victor"
+block missing:    "whiskey"
+block missing:    "xray"
+block missing:    "yankee"
+block missing:    "zulu"
+missing:    waypointName(_:)	"bravo"	small
+missing:    waypointName(_:)	"charlie"	small
+missing:    waypointName(_:)	"delta"	small
+missing:    waypointName(_:)	"echo"	small
+missing:    waypointName(_:)	"four"	small
+missing:    waypointName(_:)	"foxtrot"	small
+missing:    waypointName(_:)	"golf"	small
+missing:    waypointName(_:)	"hotel"	small
+missing:    waypointName(_:)	"india"	small
+missing:    waypointName(_:)	"juliett"	small
+missing:    waypointName(_:)	"kilo"	small
+missing:    waypointName(_:)	"lima"	small
+missing:    waypointName(_:)	"mike"	small
+missing:    waypointName(_:)	"november"	small
+missing:    waypointName(_:)	"one"	small
+missing:    waypointName(_:)	"oscar"	small
+missing:    waypointName(_:)	"papa"	small
+missing:    waypointName(_:)	"quebec"	small
+missing:    waypointName(_:)	"romeo"	small
+missing:    waypointName(_:)	"sierra"	small
+missing:    waypointName(_:)	"tango"	small
+missing:    waypointName(_:)	"three"	small
+missing:    waypointName(_:)	"two"	small
+missing:    waypointName(_:)	"uniform"	small
+missing:    waypointName(_:)	"victor"	small
+missing:    waypointName(_:)	"whiskey"	small
+missing:    waypointName(_:)	"xray"	small
+missing:    waypointName(_:)	"yankee"	small
+missing:    waypointName(_:)	"zulu"	small

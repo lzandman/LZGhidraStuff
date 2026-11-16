@@ -1,0 +1,124 @@
+# Builds both extensions for every Ghidra version in build.yaml's matrix and attaches the zips
+# to a draft GitHub release. Nothing is public until the draft is published by hand.
+#
+# Release: push a tag such as v1.0.0; a tag with a hyphen (v1.0.0-rc.1) drafts a pre-release.
+# Dry run: start this workflow by hand (Actions tab, or `gh workflow run release.yaml`); it
+# packages the zips as a workflow artifact and creates no release.
+#
+# In a public repository each zip also gets a signed build provenance attestation (which workflow
+# run built it, from which commit), checked with `gh attestation verify <zip> -R <owner>/<repo>`.
+# GitHub offers attestations for private repositories only on Enterprise Cloud, so a private
+# repository skips that step.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build
+    uses: ./.github/workflows/build.yaml
+
+  package:
+    name: Package and draft release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write # Sigstore signing certificate for the attestation
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: extensions-ghidra-*
+          path: built
+
+      - name: Rename zips and write SHA256SUMS
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            version=$GITHUB_REF_NAME
+          else
+            version=dev-${GITHUB_SHA::7}
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          mkdir release
+          # Gradle names a zip ghidra_<ghidra version>_PUBLIC_<build date>_<Extension>.zip.
+          find built -name '*.zip' | while read -r zip; do
+            name=$(basename "$zip")
+            ghidra=$(echo "$name" | sed -n 's/^ghidra_\(.*\)_PUBLIC_[0-9]*_.*\.zip$/\1/p')
+            ext=$(echo "$name" | sed -n 's/^ghidra_.*_PUBLIC_[0-9]*_\(.*\)\.zip$/\1/p')
+            if [ -z "$ghidra" ] || [ -z "$ext" ]; then
+              echo "unexpected zip name: $name" >&2
+              exit 1
+            fi
+            cp "$zip" "release/$ext-$version-ghidra_$ghidra.zip"
+          done
+          (cd release && sha256sum -- *.zip > SHA256SUMS)
+          ls -l release
+          cat release/SHA256SUMS
+
+      - name: Attest build provenance
+        if: ${{ !github.event.repository.private }}
+        uses: actions/attest@v4
+        with:
+          subject-path: release/*.zip
+
+      - name: Write release notes
+        env:
+          PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          # The Ghidra versions come from the zip names, so build.yaml's matrix stays the one list.
+          ghidra=$(ls release/*.zip | sed 's/.*-ghidra_\(.*\)\.zip$/\1/' | sort -u | paste -sd, - | sed 's/,/, /g')
+          if [ "$PRIVATE" = false ]; then
+            attest="To check that this repository's release workflow built a zip from the tagged commit: \`gh attestation verify <zip> -R $GITHUB_REPOSITORY\` (GitHub CLI)."
+          else
+            attest=""
+          fi
+          cat > notes.md <<EOF
+          ## Which zip
+
+          - **LZGhidraSwift**: analyzers for Swift binaries. They decode Swift string literals built in code, create data types for Swift structs, classes and enums, type the \`self\` parameter of methods, give throwing functions a calling convention that keeps their catch paths in the decompiler, and give the Swift runtime functions their signatures.
+          - **LZGhidraGeneric**: creates functions from the Mach-O function-starts table in images extracted from the dyld shared cache. Install it as well when you analyse such images with LZGhidraSwift; without it, part of their code stays outside functions.
+
+          Both can be installed together.
+
+          ## Install
+
+          These zips are for **Ghidra $ghidra** only: the \`ghidra_<version>\` in the file name must match your Ghidra exactly.
+
+          1. Download the zip, or both.
+          2. In Ghidra's project window: File → Install Extensions → the green **+** → the zip. Repeat for the second zip.
+          3. Restart Ghidra. A running Ghidra does not load new extensions.
+
+          After the restart, File → Install Extensions lists the extension as installed, with "Release $VERSION" at the end of its description. The analyzers are on by default: they run in Auto Analyze on the programs they apply to, and each writes a summary to Ghidra's application log.
+
+          For another Ghidra version, build from source; see the README.
+
+          To check the download: \`shasum -a 256 -c SHA256SUMS\` (macOS) or \`sha256sum -c SHA256SUMS\` (Linux), in the download directory. $attest
+
+          EOF
+          cat notes.md
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ env.VERSION }}
+          path: |
+            release/*
+            notes.md
+
+      - name: Create draft release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Semantic versioning: a hyphen marks a pre-release (v0.1.0-rc.1).
+          prerelease=()
+          case "$GITHUB_REF_NAME" in *-*) prerelease=(--prerelease) ;; esac
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft "${prerelease[@]}" \
+            --verify-tag --title "$GITHUB_REF_NAME" --notes-file notes.md --generate-notes \
+            release/*

@@ -1,0 +1,11 @@
+# Known differences of check_throws.py on libThrows-stripped.dylib, compared by test-fixtures.sh.
+# One line per difference, as check_throws.py prints it; # lines are comments.
+#
+# Two throwing functions with local symbols are reached only by tail calls (b, jmp) from other
+# throwing functions: the specialization of FileLoader.load from its protocol witness thunk, and
+# the merged body of mergeA and mergeB from both entry points. No caller tests the error register
+# after a call to them, so the analyzer does not find them once strip -x has removed their
+# symbols. A tail call is no evidence on its own: a throwing function may also end with a tail
+# call to a function that does not throw. Ghidra 12.2, Apple Swift 6.4 (swiftlang-6.4.0.34.1).
+function signature specialization <Arg[1] = Dead> of Throws.FileLoader.load(Swift.Int) throws -> Swift.Int (0x2310): convention None, expected throws
+merged Throws.mergeA(Swift.Int) throws -> Swift.Int (0x1f6c): convention None, expected throws

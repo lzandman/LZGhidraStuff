@@ -1,0 +1,7 @@
+# Known differences of check_report.py on the Strings-x86_64 dump, compared by test-fixtures.sh.
+# One line per difference, as check_report.py prints it; # lines are comments.
+#
+# spelling(_:) builds the tag word of "Sharp" and "Flat" at run time, (b & 1 | -0x1c) << 56, not
+# as a constant (see expected-strings.txt). Apple Swift 6.4 (swiftlang-6.4.0.34.1).
+missing:    spelling(_:)	"Flat"	small
+missing:    spelling(_:)	"Sharp"	small
