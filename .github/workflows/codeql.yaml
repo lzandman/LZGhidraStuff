@@ -2,6 +2,8 @@
 # real compile against a Ghidra release, so that CodeQL resolves the Ghidra API: default setup has
 # no GHIDRA_INSTALL_DIR, its Gradle step fails, and it reports "Required Gradle version not
 # specified" (no Gradle wrapper here). Python and the workflow files need no build.
+# Not scanned: the Ghidra scripts (*/ghidra_scripts/, LZGhidraSwift/devtools/*.java; 22 of 126 Java
+# files), which Ghidra compiles when they run and Gradle does not compile.
 # Runs on pushes to main, on pull requests and weekly, as default setup did. Keep the Ghidra and
 # Gradle versions in step with build.yaml.
 name: CodeQL
