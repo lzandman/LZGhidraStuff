@@ -1,0 +1,86 @@
+# CodeQL code scanning (advanced setup; replaces GitHub's default setup). Java is analysed from a
+# real compile against a Ghidra release, so that CodeQL resolves the Ghidra API: default setup has
+# no GHIDRA_INSTALL_DIR, its Gradle step fails, and it reports "Required Gradle version not
+# specified" (no Gradle wrapper here). Python and the workflow files need no build.
+# Runs on pushes to main, on pull requests and weekly, as default setup did. Keep the Ghidra and
+# Gradle versions in step with build.yaml.
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # upload the results to code scanning
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: java-kotlin
+            build-mode: manual
+          - language: python
+            build-mode: none
+          - language: actions
+            build-mode: none
+    env:
+      GHIDRA_VERSION: "12.2"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download Ghidra ${{ env.GHIDRA_VERSION }}
+        if: matrix.build-mode == 'manual'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/ghidra-zip"
+          gh release download "Ghidra_${GHIDRA_VERSION}_build" \
+            --repo NationalSecurityAgency/ghidra --pattern 'ghidra_*_PUBLIC_*.zip' \
+            --dir "$RUNNER_TEMP/ghidra-zip"
+          unzip -q "$RUNNER_TEMP/ghidra-zip"/*.zip -d "$RUNNER_TEMP/ghidra"
+          install_dir=$(ls -d "$RUNNER_TEMP"/ghidra/ghidra_*)
+          echo "GHIDRA_INSTALL_DIR=$install_dir" >> "$GITHUB_ENV"
+          java_min=$(sed -n 's/^application.java.min=//p' "$install_dir/Ghidra/application.properties")
+          echo "JAVA_MIN=$java_min" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v6
+        if: matrix.build-mode == 'manual'
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_MIN }}
+
+      # Stays on v5; see the comment in build.yaml.
+      - uses: gradle/actions/setup-gradle@v5
+        if: matrix.build-mode == 'manual'
+        with:
+          gradle-version: "9.8.1"
+
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      # Compile only (main and test sources); no lint, tests or zips. --no-daemon so that the
+      # CodeQL tracer sees the compiler.
+      - name: Compile both extensions
+        if: matrix.build-mode == 'manual'
+        run: |
+          for ext in LZGhidraGeneric LZGhidraSwift; do
+            (cd "$ext" && gradle --no-daemon compileJava compileTestJava)
+          done
+
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"
