@@ -19,10 +19,25 @@
 //                                                               reference to its block string
 //   BLOCKREF-EXTRA    from  to  literal                         reference into the block from an
 //                                                               address with no such bookmark string
-//   DECOMP   entry  address  label  equate|comment|none         how the decompiled C of the
+//   DECOMP   entry  address  label  equate|comment|none  word0  how the decompiled C of the
 //                                                               function shows each marked string:
 //                                                               an equate name of the string, else
-//                                                               its comment line, else neither
+//                                                               its comment line, else neither; and
+//                                                               word 0 of a small string: its
+//                                                               equate (S"..." without .hi), else
+//                                                               pointer if the statement assigning
+//                                                               it shows an address (&, a symbol or
+//                                                               a quoted string), else none; - for
+//                                                               large, empty and probable strings
+//   LARGEREF entry  address  literal  bytes  from,from,...|-   each large string in a bookmark: the
+//                                                               address of its bytes in __cstring
+//                                                               (? if not found) and the references
+//                                                               from the function into the bytes,
+//                                                               without the LARGEREF-WRONG ones
+//   LARGEREF-WRONG  entry  from  to  literal                   operand reference from the function
+//                                                               to the bytes of a large string of the
+//                                                               function less 32, the value that word
+//                                                               1 is built from, not the bytes
 //@category Swift
 
 import java.io.File;
@@ -30,6 +45,8 @@ import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import ghidra.app.decompiler.DecompInterface;
 import ghidra.app.decompiler.DecompileOptions;
@@ -37,6 +54,7 @@ import ghidra.app.decompiler.DecompileResults;
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressIterator;
+import ghidra.program.model.address.AddressSet;
 import ghidra.program.model.address.AddressSpace;
 import ghidra.program.model.listing.*;
 import ghidra.program.model.mem.MemoryBlock;
@@ -52,6 +70,12 @@ public class DumpSwiftStrings extends GhidraScript {
 
 	private static final String CATEGORY_SMALL = "Swift string (small)";
 	private static final String CATEGORY_LARGE = "Swift string (large)";
+	/** Word 1 of a large string is the address of its bytes less this (NATIVE_BIAS). */
+	private static final int LARGE_BIAS = 32;
+	/** {@code SVar1.bridgeObject = (void *)S"C".hi;}: the variable whose word 1 is the equate. */
+	private static final Pattern HI_ASSIGN =
+		Pattern.compile(
+			"(\\w+)\\.bridgeObject = (?:\\([^()]*\\) ?)?(S\"(?:[^\"\\\\]|\\\\.)*\"\\.hi);");
 
 	@Override
 	protected void run() throws Exception {
@@ -74,6 +98,10 @@ public class DumpSwiftStrings extends GhidraScript {
 		Map<Function, List<String[]>> byFunction =
 			new TreeMap<>(Comparator.comparing(Function::getEntryPoint));
 		int[] decomp = new int[3];
+		// Function -> its large strings in bookmarks: address, literal.
+		Map<Function, List<String[]>> largeByFunction =
+			new TreeMap<>(Comparator.comparing(Function::getEntryPoint));
+		LargeRefCounts largeRefs = null;
 		try (PrintWriter out = new PrintWriter(args[0], StandardCharsets.UTF_8)) {
 			// The iterator gives creation order: a one-shot run on one function puts its bookmarks
 			// last. Sorted (stable) by address.
@@ -109,11 +137,16 @@ public class DumpSwiftStrings extends GhidraScript {
 					if (!large) {
 						smallMarks.add(a + "\t" + literal);
 					}
+					else if (f != null) {
+						largeByFunction.computeIfAbsent(f, k -> new ArrayList<>())
+								.add(new String[] { a.toString(), literal });
+					}
 					if (f != null) {
 						byFunction.computeIfAbsent(f, k -> new ArrayList<>())
-								.add(new String[] { a.toString(), label, literal });
+								.add(new String[] { a.toString(), label, literal, kind });
 					}
-					String line = "Swift " + label;
+					// The comment line of a large string ends in " (large)", its bookmark label not.
+					String line = "Swift " + label + (large ? " (large)" : "");
 					if (!hasLine(eol, line) && !hasLine(pre, line)) {
 						out.println(String.join("\t", "MISMATCH", a.toString(), label));
 						mismatches++;
@@ -165,12 +198,17 @@ public class DumpSwiftStrings extends GhidraScript {
 			if (StringBlock.space(currentProgram) != null) {
 				block = dumpBlock(out, smallMarks);
 			}
+			largeRefs = dumpLargeRefs(out, largeByFunction);
 			decompile(out, byFunction, cDir, decomp);
 		}
 		println(("DumpSwiftStrings: %d strings in bookmarks, %d comments, %d equate references, " +
 			"%d mismatches; in the decompiler %d by equate, %d by comment, %d not shown")
 					.formatted(marks, comments, equates, mismatches, decomp[0], decomp[1],
 						decomp[2]));
+		println(("DumpSwiftStrings: large strings: %d, %d without a reference to their bytes, " +
+			"%d with more than one, %d not in __cstring, %d references to the bytes less 32")
+					.formatted(largeRefs.strings, largeRefs.none, largeRefs.several,
+						largeRefs.notFound, largeRefs.wrong));
 		if (block != null) {
 			println(("DumpSwiftStrings: string block: %d memory blocks, %d strings (%d defined), " +
 				"%d references, %d missing, %d extra").formatted(block[5], block[0], block[1],
@@ -275,13 +313,187 @@ public class DumpSwiftStrings extends GhidraScript {
 					}
 					out.println(
 						String.join("\t", "DECOMP", f.getEntryPoint().toString(), m[0], m[1],
-							how));
+							how, m[3].equals("large") ? "-" : word0(c, m[1], literal)));
 				}
 			}
 		}
 		finally {
 			d.dispose();
 		}
+	}
+
+	/**
+	 * How the decompiled C {@code c} (lines joined) shows word 0 of the string with bookmark label
+	 * {@code label}: {@code equate} if {@code S"..."} occurs without {@code .hi}, else
+	 * {@code pointer} if a statement assigning word 0 of a variable whose word 1 is the
+	 * {@code .hi} equate shows an address, else {@code none}; {@code -} for the empty string (word
+	 * 0 is 0, no equate) and probable strings (no equates). Small strings only.
+	 */
+	static String word0(String c, String label, String literal) {
+		if (label.endsWith("?") || literal.equals("\"\"")) {
+			return "-";
+		}
+		String name = "S" + literal;
+		for (int i = c.indexOf(name); i >= 0; i = c.indexOf(name, i + 1)) {
+			if (!c.startsWith(".hi", i + name.length())) {
+				return "equate";
+			}
+		}
+		Matcher m = HI_ASSIGN.matcher(c);
+		while (m.find()) {
+			if (!m.group(2).equals(name + ".hi")) {
+				continue;
+			}
+			// The assignment of word 0 of the same variable, after word 1 or before it.
+			String prefix = m.group(1) + ".str = ";
+			int at = c.indexOf(prefix, m.end());
+			if (at < 0) {
+				at = c.lastIndexOf(prefix, m.start());
+			}
+			if (at < 0) {
+				continue;
+			}
+			int end = c.indexOf(';', at);
+			String value = c.substring(at + prefix.length(), end < 0 ? c.length() : end);
+			if (showsAddress(value)) {
+				return "pointer";
+			}
+		}
+		return "none";
+	}
+
+	/**
+	 * True if the C expression shows an address: {@code &}, a quoted string, or a symbol (an
+	 * identifier that is not a type in a cast); an equate {@code S"..."} or a number is none.
+	 */
+	static boolean showsAddress(String value) {
+		// Casts like (char *) or (long), then the equates.
+		String v = value.replaceAll("\\((?:char|long|ulong|void|int|uint|byte|undefined\\d*)" +
+			" ?\\**\\)", "").replaceAll("S\"(?:[^\"\\\\]|\\\\.)*\"", "");
+		return v.contains("&") || v.contains("\"") || v.matches("(?s).*\\b[A-Za-z_]\\w*.*");
+	}
+
+	/** Counts of the LARGEREF lines. */
+	private static final class LargeRefCounts {
+		int strings;
+		int none;
+		int several;
+		int notFound;
+		int wrong;
+	}
+
+	/**
+	 * Writes the LARGEREF and LARGEREF-WRONG lines for the large strings in bookmarks, by
+	 * function. The bytes are found by their text in the {@code __cstring} blocks.
+	 */
+	private LargeRefCounts dumpLargeRefs(PrintWriter out,
+			Map<Function, List<String[]>> largeByFunction) throws Exception {
+		LargeRefCounts counts = new LargeRefCounts();
+		Map<String, Address> cstrings = cstrings();
+		for (Map.Entry<Function, List<String[]>> e : largeByFunction.entrySet()) {
+			Function f = e.getKey();
+			// Bytes less 32 -> literal, for the wrong references.
+			Map<Address, String> biased = new HashMap<>();
+			for (String[] m : e.getValue()) {
+				Address bytes = cstrings.get(m[1]);
+				if (bytes != null) {
+					biased.put(bytes.subtract(LARGE_BIAS), m[1]);
+				}
+			}
+			Set<String> wrong = new LinkedHashSet<>();
+			for (Address from : f.getBody().getAddresses(true)) {
+				for (Reference r : currentProgram.getReferenceManager().getReferencesFrom(from)) {
+					String literal = biased.get(r.getToAddress());
+					if (literal != null && r.getOperandIndex() >= 0) {
+						wrong.add(String.join("\t", "LARGEREF-WRONG", f.getEntryPoint().toString(),
+							from.toString(),
+							r.getToAddress().toString(), literal));
+					}
+				}
+			}
+			for (String[] m : e.getValue()) {
+				counts.strings++;
+				Address bytes = cstrings.get(m[1]);
+				List<String> froms = new ArrayList<>();
+				if (bytes != null) {
+					int n = utf8Length(m[1]);
+					AddressSet range = new AddressSet(bytes, bytes.add(n - 1));
+					for (Address from : f.getBody().getAddresses(true)) {
+						for (Reference r : currentProgram.getReferenceManager()
+								.getReferencesFrom(from)) {
+							if (range.contains(r.getToAddress()) &&
+								!(r.getOperandIndex() >= 0 &&
+									biased.containsKey(r.getToAddress()))) {
+								froms.add(from.toString());
+							}
+						}
+					}
+				}
+				else {
+					counts.notFound++;
+				}
+				counts.none += froms.isEmpty() ? 1 : 0;
+				counts.several += froms.size() > 1 ? 1 : 0;
+				out.println(String.join("\t", "LARGEREF", f.getEntryPoint().toString(), m[0],
+					m[1], bytes == null ? "?" : bytes.toString(),
+					froms.isEmpty() ? "-" : String.join(",", froms)));
+			}
+			for (String w : wrong) {
+				out.println(w);
+				counts.wrong++;
+			}
+		}
+		return counts;
+	}
+
+	/** The NUL-terminated UTF-8 strings of the __cstring blocks, quoted, to their addresses. */
+	private Map<String, Address> cstrings() throws Exception {
+		Map<String, Address> map = new HashMap<>();
+		for (MemoryBlock b : currentProgram.getMemory().getBlocks()) {
+			if (!b.getName().equals("__cstring") || !b.isInitialized()) {
+				continue;
+			}
+			byte[] bytes = new byte[(int) b.getSize()];
+			b.getBytes(b.getStart(), bytes);
+			int start = 0;
+			for (int i = 0; i < bytes.length; i++) {
+				if (bytes[i] == 0) {
+					if (i > start) {
+						String text = new String(bytes, start, i - start, StandardCharsets.UTF_8);
+						map.putIfAbsent(SwiftStringCodec.quote(text), b.getStart().add(start));
+					}
+					start = i + 1;
+				}
+			}
+		}
+		return map;
+	}
+
+	/** The UTF-8 length of the text of a quoted literal (as SwiftStringCodec.quote writes it). */
+	static int utf8Length(String literal) {
+		String body = literal.substring(1, literal.length() - 1);
+		StringBuilder sb = new StringBuilder();
+		for (int i = 0; i < body.length(); i++) {
+			char ch = body.charAt(i);
+			if (ch != '\\') {
+				sb.append(ch);
+				continue;
+			}
+			char next = body.charAt(++i);
+			if (next == 'x') {
+				sb.append((char) Integer.parseInt(body.substring(i + 1, i + 3), 16));
+				i += 2;
+			}
+			else {
+				sb.append(switch (next) {
+					case 'n' -> '\n';
+					case 'r' -> '\r';
+					case 't' -> '\t';
+					default -> next;
+				});
+			}
+		}
+		return sb.toString().getBytes(StandardCharsets.UTF_8).length;
 	}
 
 	private static boolean hasLine(String comment, String line) {

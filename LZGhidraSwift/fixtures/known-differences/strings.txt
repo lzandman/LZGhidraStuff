@@ -35,3 +35,13 @@ missing:    waypointName(_:)	"whiskey"	small
 missing:    waypointName(_:)	"xray"	small
 missing:    waypointName(_:)	"yankee"	small
 missing:    waypointName(_:)	"zulu"	small
+#
+# The decompiler types word 0 of String as char * (Ghidra's
+# Swift demangler defines String as { char *str; void *bridgeObject; }) and shows it as an address
+# when its value lies inside the image (base 0, 64 KB): "C" 0x43, "m" 0x6d, "Cb" 0x6243, "é" 0xa9c3,
+# "×" 0x97c3. The equate of word 0 does not show; the .hi equate of word 1 does.
+decompiler pointer: argLengths()	"Cb"
+decompiler pointer: argLengths()	"m"
+decompiler pointer: argNonASCII()	"×"
+decompiler pointer: argNonASCII()	"é"
+decompiler pointer: noteName()	"C"

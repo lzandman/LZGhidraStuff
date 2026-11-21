@@ -5,3 +5,28 @@
 # as a constant (see expected-strings.txt). Apple Swift 6.4 (swiftlang-6.4.0.34.1).
 missing:    spelling(_:)	"Flat"	small
 missing:    spelling(_:)	"Sharp"	small
+#
+# The decompiler types word 0 of String as char * (Ghidra's
+# Swift demangler defines String as { char *str; void *bridgeObject; }) and shows it as an address
+# when its value lies inside the image (base 0, 64 KB): "C" 0x43, "m" 0x6d, "Cb" 0x6243, "é" 0xa9c3,
+# "×" 0x97c3. The equate of word 0 does not show; the .hi equate of word 1 does.
+# On x86_64 "×" has no tag-word instruction of its own: the compiler reuses the register that
+# holds the tag word of "é" (the same value, 0xE2 << 56), so the C shows S"é".hi for it, and
+# neither equate nor comment of "×" ("decompiler none").
+#
+# Word 1 of a large string is (address of the bytes - 32) | 1 << 63; the lea that loads
+# the address - 32 gets a data reference from Ghidra to the previous literal, packed 32 bytes
+# apart ("large ref wrong", 4). The analyzer adds its reference only if no instruction of the
+# function refers to the bytes yet, so the two strings whose bytes the next lea refers to get
+# none ("large ref missing"). arm64 has no reference on adrp/add.
+decompiler none:    argNonASCII()	"×"
+decompiler pointer: argLengths()	"Cb"
+decompiler pointer: argLengths()	"m"
+decompiler pointer: argNonASCII()	"é"
+decompiler pointer: noteName()	"C"
+large ref missing:  argLarge()	"0123456789abcdef"
+large ref missing:  argLarge()	"configuration_key"
+large ref wrong:    argLarge()	"0123456789abcdef"
+large ref wrong:    argLarge()	"Füße über Hände"
+large ref wrong:    argLarge()	"a literal of exactly forty bytes, padded"
+large ref wrong:    argLarge()	"configuration_key"

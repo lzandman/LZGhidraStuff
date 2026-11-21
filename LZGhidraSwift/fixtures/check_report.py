@@ -19,6 +19,16 @@ A dump of a program with the string block (option "String block") also has BLOCK
 and BLOCKREF lines. Then every expected small literal except the empty one must
 be in the block once, no other literal may be there, and BLOCKREF lines (a
 missing or an extra reference) count as errors.
+
+A dump also has DECOMP, LARGEREF and LARGEREF-WRONG lines. Errors, one line each,
+with the function's demangled name:
+- "decompiler none": the decompiled C shows neither an equate nor the comment
+  line of a string;
+- "decompiler pointer": the C shows word 0 of a small string as an address;
+- "large ref missing" / "large ref twice": a large string without a reference
+  from its function to its bytes, or with more than one;
+- "large ref wrong": a reference from an instruction to the bytes of a large
+  string less 32 (the value word 1 is built from).
 """
 
 import re
@@ -30,6 +40,9 @@ LINE = re.compile(
 )
 MARK = re.compile(r"^MARK\t(\S+)\t(.+?)\t(\S+)\t(small|large)\t(\w+)\t(\".*\")$")
 BLOCK = re.compile(r"^BLOCK\t(\S+)\t(\".*\")\t(\S+)\t(\S+)$")
+DECOMP = re.compile(r"^DECOMP\t(\S+)\t(\S+)\t(\".*\"\??)\t(\w+)\t(\S+)$")
+LARGEREF = re.compile(r"^LARGEREF\t(\S+)\t(\S+)\t(\".*\")\t(\S+)\t(\S+)$")
+LARGEREF_WRONG = re.compile(r"^LARGEREF-WRONG\t(\S+)\t(\S+)\t(\S+)\t(\".*\")$")
 
 
 def demangle(names):
@@ -48,11 +61,26 @@ def main():
     hits = []
     block = []
     block_refs = []
+    decomp = []
+    large_refs = []
+    large_wrong = []
     with open(log, encoding="utf-8") as f:
         for line in f:
             m = BLOCK.match(line.rstrip("\n"))
             if m:
                 block.append(m.group(2))
+                continue
+            m = DECOMP.match(line.rstrip("\n"))
+            if m:
+                decomp.append(m.groups())
+                continue
+            m = LARGEREF.match(line.rstrip("\n"))
+            if m:
+                large_refs.append(m.groups())
+                continue
+            m = LARGEREF_WRONG.match(line.rstrip("\n"))
+            if m:
+                large_wrong.append(m.groups())
                 continue
             if line.startswith("BLOCKREF-"):
                 block_refs.append(line.rstrip("\n"))
@@ -114,8 +142,41 @@ def main():
             print(e)
         block_errors = len(errors)
         summary += f"; block: {len(block)} strings, {block_errors} difference{'' if block_errors == 1 else 's'}"
+    markup_errors = markup(hits, names, expected_funcs, decomp, large_refs, large_wrong)
+    for e in markup_errors:
+        print(e)
+    if decomp or large_refs:
+        n = len(markup_errors)
+        summary += f"; markup: {n} difference{'' if n == 1 else 's'}"
     print(summary)
-    return 1 if missing or unexpected or block_errors else 0
+    return 1 if missing or unexpected or block_errors or markup_errors else 0
+
+
+def markup(hits, names, expected_funcs, decomp, large_refs, large_wrong):
+    """The error lines of the DECOMP, LARGEREF and LARGEREF-WRONG lines, sorted."""
+    # Function entry -> its name: the expected one if a symbol demangles to it.
+    func_at = {}
+    for entry, symbols, *_ in hits:
+        funcs = [names.get(n, n) for n in symbols.split("|")]
+        listed = [f for f in funcs if f in expected_funcs]
+        func_at[entry] = " | ".join(listed or funcs)
+    errors = set()
+    for entry, _, label, how, word0 in decomp:
+        func = func_at.get(entry, entry)
+        if how == "none":
+            errors.add(f"decompiler none:    {func}\t{label}")
+        if word0 == "pointer":
+            errors.add(f"decompiler pointer: {func}\t{label}")
+    for entry, _, literal, _, froms in large_refs:
+        func = func_at.get(entry, entry)
+        n = 0 if froms == "-" else len(froms.split(","))
+        if n == 0:
+            errors.add(f"large ref missing:  {func}\t{literal}")
+        elif n > 1:
+            errors.add(f"large ref twice:    {func}\t{literal}")
+    for entry, _, _, literal in large_wrong:
+        errors.add(f"large ref wrong:    {func_at.get(entry, entry)}\t{literal}")
+    return sorted(errors)
 
 
 if __name__ == "__main__":

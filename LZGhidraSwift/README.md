@@ -433,7 +433,7 @@ Known display limits:
 
 `ghidra_scripts/` (add the directory in the Script Manager, or `-scriptPath` headless):
 
-- `DumpSwiftStrings.java <output> [<C directory>]` writes the markup (bookmarks, comments, equates) and, per string, whether the decompiled C shows it, to a text file. With a `swift_strings` block it also writes the block's strings and their references (`BLOCK` lines) and the small strings whose reference is missing or extra (`BLOCKREF-MISSING`, `BLOCKREF-EXTRA`).
+- `DumpSwiftStrings.java <output> [<C directory>]` writes the markup (bookmarks, comments, equates) and, per string, whether the decompiled C shows it and whether it shows word 0 of a small string as an address (`DECOMP` lines), to a text file. For each large string it writes the references from its function to its bytes (`LARGEREF`) and the references to the bytes less 32 (`LARGEREF-WRONG`, the value word 1 is built from). With a `swift_strings` block it also writes the block's strings and their references (`BLOCK` lines) and the small strings whose reference is missing or extra (`BLOCKREF-MISSING`, `BLOCKREF-EXTRA`).
 - `RerunSwiftStrings.java [EOL|PRE]` adds user lines to two comments and runs the analyzer again with the program's analysis options, for the idempotency test.
 
 `fixtures/` has the test program `Strings.swift`, its expected literals (`expected-strings.txt`) and `check_report.py`. `make -C fixtures` builds it for arm64 (`-O` and `-Onone`) and x86_64 (`-O`) with `swiftc`. The x86_64 build needs no Rosetta: Ghidra only reads it. `devtools/headless.sh` and `devtools/run-fixtures.sh` run it headless.
