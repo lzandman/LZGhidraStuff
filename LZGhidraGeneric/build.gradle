@@ -43,6 +43,7 @@ dependencies {
 }
 
 buildExtension.exclude 'README.md'
+buildExtension.exclude 'zip/**'
 buildExtension.exclude 'CLAUDE.md'
 buildExtension.exclude 'devtools/**'
 buildExtension.exclude '.idea/**'
@@ -57,13 +58,19 @@ buildExtension.from('../NOTICE') {
 	into project.name
 }
 
+// README.md is for the repository (developer content, links to repository paths); the zip gets
+// the short zip/README.txt instead, with the release number filled in below.
+buildExtension.from('zip') {
+	into project.name
+}
+
 // Release number at the end of the description, which Ghidra's Install Extensions dialog shows.
 // The version field cannot hold it: Ghidra fills it with its own version and compares it on install.
 // build.yaml sets lzRelease (ORG_GRADLE_PROJECT_lzRelease) to the tag, or to dev-<commit> in a run
 // without a tag; local builds say "dev".
 def lzRelease = project.findProperty('lzRelease') ?: 'dev'
 buildExtension.inputs.property('lzRelease', lzRelease)
-buildExtension.filesMatching('**/extension.properties') {
+buildExtension.filesMatching(['**/extension.properties', '**/README.txt']) {
 	filter { line -> line.replace('@lzrelease@', lzRelease) }
 }
 
