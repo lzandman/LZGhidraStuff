@@ -37,7 +37,10 @@
 //   LARGEREF-WRONG  entry  from  to  literal                   operand reference from the function
 //                                                               to the bytes of a large string of the
 //                                                               function less 32, the value that word
-//                                                               1 is built from, not the bytes
+//                                                               1 is built from, not the bytes: the
+//                                                               instruction's register reaches an OR
+//                                                               within 12 instructions (copies, cmov,
+//                                                               jumps), not a call or an add first
 //@category Swift
 
 import java.io.File;
@@ -58,6 +61,8 @@ import ghidra.program.model.address.AddressSet;
 import ghidra.program.model.address.AddressSpace;
 import ghidra.program.model.listing.*;
 import ghidra.program.model.mem.MemoryBlock;
+import ghidra.program.model.pcode.PcodeOp;
+import ghidra.program.model.pcode.Varnode;
 import ghidra.program.model.symbol.Equate;
 import ghidra.program.model.symbol.EquateReference;
 import ghidra.program.model.symbol.EquateTable;
@@ -401,10 +406,12 @@ public class DumpSwiftStrings extends GhidraScript {
 				}
 			}
 			Set<String> wrong = new LinkedHashSet<>();
+			Set<String> wrongRefs = new HashSet<>();
 			for (Address from : f.getBody().getAddresses(true)) {
 				for (Reference r : currentProgram.getReferenceManager().getReferencesFrom(from)) {
 					String literal = biased.get(r.getToAddress());
-					if (literal != null && r.getOperandIndex() >= 0) {
+					if (literal != null && r.getOperandIndex() >= 0 && reachesOr(f, from)) {
+						wrongRefs.add(refKey(r));
 						wrong.add(String.join("\t", "LARGEREF-WRONG", f.getEntryPoint().toString(),
 							from.toString(),
 							r.getToAddress().toString(), literal));
@@ -422,8 +429,7 @@ public class DumpSwiftStrings extends GhidraScript {
 						for (Reference r : currentProgram.getReferenceManager()
 								.getReferencesFrom(from)) {
 							if (range.contains(r.getToAddress()) &&
-								!(r.getOperandIndex() >= 0 &&
-									biased.containsKey(r.getToAddress()))) {
+								!wrongRefs.contains(refKey(r))) {
 								froms.add(from.toString());
 							}
 						}
@@ -444,6 +450,88 @@ public class DumpSwiftStrings extends GhidraScript {
 			}
 		}
 		return counts;
+	}
+
+	/**
+	 * True if a register that {@code from} writes reaches an INT_OR within 12 instructions of
+	 * {@code f}, following fall-through and jumps, through copies (also cmov) but not through
+	 * other ops (an add of -32 makes the value the bytes, a call ends the path). Independent of
+	 * the analyzer's backward walk: the lea of a StaticString argument or of the bytes
+	 * themselves is not a wrong reference, though its target can be another literal's bytes
+	 * less 32.
+	 */
+	private boolean reachesOr(Function f, Address from) {
+		Instruction start = currentProgram.getListing().getInstructionAt(from);
+		if (start == null) {
+			return false;
+		}
+		List<Varnode> written = new ArrayList<>();
+		for (PcodeOp op : start.getPcode()) {
+			if (op.getOutput() != null && op.getOutput().isRegister()) {
+				written.add(op.getOutput());
+			}
+		}
+		Deque<Object[]> todo = new ArrayDeque<>();
+		for (Address next : successors(f, start)) {
+			todo.add(new Object[] { next, written, 1 });
+		}
+		Set<Address> seen = new HashSet<>();
+		while (!todo.isEmpty()) {
+			Object[] s = todo.poll();
+			Address at = (Address) s[0];
+			@SuppressWarnings("unchecked")
+			List<Varnode> tainted = new ArrayList<>((List<Varnode>) s[1]);
+			int depth = (Integer) s[2];
+			Instruction instr = currentProgram.getListing().getInstructionAt(at);
+			if (instr == null || !seen.add(at) || instr.getFlowType().isCall()) {
+				continue;
+			}
+			PcodeOp[] ops = instr.getPcode();
+			boolean conditional =
+				Arrays.stream(ops).anyMatch(o -> o.getOpcode() == PcodeOp.CBRANCH);
+			for (PcodeOp op : ops) {
+				boolean in = Arrays.stream(op.getInputs())
+						.anyMatch(v -> tainted.stream().anyMatch(t -> t.intersects(v)));
+				if (op.getOpcode() == PcodeOp.INT_OR && in) {
+					return true;
+				}
+				Varnode out = op.getOutput();
+				if (out == null) {
+					continue;
+				}
+				if (op.getOpcode() == PcodeOp.COPY && in) {
+					tainted.add(out);
+				}
+				else if (!conditional) {
+					tainted.removeIf(t -> t.intersects(out));
+				}
+			}
+			tainted.removeIf(Varnode::isUnique);
+			if (!tainted.isEmpty() && depth < 12) {
+				for (Address next : successors(f, instr)) {
+					todo.add(new Object[] { next, tainted, depth + 1 });
+				}
+			}
+		}
+		return false;
+	}
+
+	/** A key for a reference: two lookups of the same one may give unequal objects. */
+	private static String refKey(Reference r) {
+		return r.getFromAddress() + ">" + r.getToAddress() + "@" + r.getOperandIndex();
+	}
+
+	/** The fall-through and jump targets of {@code instr} inside {@code f}. */
+	private static List<Address> successors(Function f, Instruction instr) {
+		List<Address> next = new ArrayList<>();
+		if (instr.getFallThrough() != null) {
+			next.add(instr.getFallThrough());
+		}
+		if (instr.getFlowType().isJump()) {
+			next.addAll(Arrays.asList(instr.getFlows()));
+		}
+		next.removeIf(a -> !f.getBody().contains(a));
+		return next;
 	}
 
 	/** The NUL-terminated UTF-8 strings of the __cstring blocks, quoted, to their addresses. */

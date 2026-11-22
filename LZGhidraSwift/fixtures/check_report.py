@@ -26,9 +26,10 @@ with the function's demangled name:
   line of a string;
 - "decompiler pointer": the C shows word 0 of a small string as an address;
 - "large ref missing" / "large ref twice": a large string without a reference
-  from its function to its bytes, or with more than one;
+  from its function to its bytes, or with more references than it has hits in
+  the function;
 - "large ref wrong": a reference from an instruction to the bytes of a large
-  string less 32 (the value word 1 is built from).
+  string less 32 whose value reaches an OR (the value word 1 is built from).
 """
 
 import re
@@ -167,12 +168,16 @@ def markup(hits, names, expected_funcs, decomp, large_refs, large_wrong):
             errors.add(f"decompiler none:    {func}\t{label}")
         if word0 == "pointer":
             errors.add(f"decompiler pointer: {func}\t{label}")
+    # A literal can have several hits in a function, one reference each.
+    hits_of = {}
+    for entry, _, literal, _, _ in large_refs:
+        hits_of[(entry, literal)] = hits_of.get((entry, literal), 0) + 1
     for entry, _, literal, _, froms in large_refs:
         func = func_at.get(entry, entry)
         n = 0 if froms == "-" else len(froms.split(","))
         if n == 0:
             errors.add(f"large ref missing:  {func}\t{literal}")
-        elif n > 1:
+        elif n > hits_of[(entry, literal)]:
             errors.add(f"large ref twice:    {func}\t{literal}")
     for entry, _, _, literal in large_wrong:
         errors.add(f"large ref wrong:    {func_at.get(entry, entry)}\t{literal}")

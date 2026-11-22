@@ -328,7 +328,7 @@ It prints its reports to standard error: parameter count mismatches between the 
 Swift passes and stores a `String` as two 64-bit words. For a literal, the compiler builds both words from immediates, so the text never appears as a string in the binary:
 
 - **Small strings** (up to 15 UTF-8 bytes): the bytes are the words themselves. `"chord_change"` is `0x68635f64726f6863`, `0xec00000065676e61`; the top byte `0xEC` of word 1 is the tag (ASCII, small) and the count (12). Ghidra's string search does not find these, and the decompiler shows two hex constants.
-- **Large strings** (16 bytes or more): the bytes are in `__cstring`, but word 1 is the address of the bytes minus 32, with bit 63 set, and word 0 is the count with flags (`0xD000…` | count for ASCII). Ghidra adds no reference from the code to the bytes.
+- **Large strings** (16 bytes or more): the bytes are in `__cstring`, but word 1 is the address of the bytes minus 32, with bit 63 set, and word 0 is the count with flags (`0xD000…` | count for ASCII). Ghidra adds no reference from the code to the bytes; on x86_64 it adds one from the `lea` to the bytes minus 32, which is the previous literal when literals are packed.
 
 The analyzer runs a value-set data flow over the p-code of each function that has a candidate constant (a tag-like value or bit 63 moved or ORed into a register). It pairs word 0 and word 1 where the string is used:
 
@@ -352,7 +352,7 @@ At the instruction that completes each string (the later of the two words):
 | Equates on instruction operands that hold a whole word | `S"Flat"`, `S"Flat".hi` | always (certain small strings) |
 | Equates on the decompiler's constants, by dynamic hash | `*(undefined8 *)(puVar1 + 0x20) = S"chord_change";` | Decompiler equates |
 | PRE comment line at the use, for strings no equate shows | `/* Swift "json" */` above `String::_bridgeToObjectiveC()` | Decompiler equates |
-| Data reference from the `orr` to the bytes of a large string | | Large strings |
+| Data reference from the `orr` (`or` on x86_64) to the bytes of a large string, unless one of the string's own instructions refers to them; Ghidra's reference from the string's `lea` to the bytes minus 32 is deleted (not a user-defined one) | | Large strings |
 | A UTF-8 string in the block `swift_strings`, defined as data, with a data reference from the completing instruction (small strings only) | `s_chord_change_swift_strings__00000006` | String block (off by default, a workaround) |
 
 Search → Program Text (comments) finds a string, and the Bookmarks window, filtered on category `Swift string (small)` or `Swift string (large)`, lists them by kind.

@@ -206,8 +206,9 @@ public class SwiftStringLiteralsAnalyzer extends AbstractAnalyzer {
 		String markupSummary() {
 			return "markup: %d comments, %d bookmarks, %d operand equates, ".formatted(
 				marked.comments(), marked.bookmarks(), marked.equates()) +
-				"%d large-string references added, %d present".formatted(marked.refsAdded(),
+				"%d large-string references added, %d present, ".formatted(marked.refsAdded(),
 					marked.refsPresent()) +
+				"%d wrong ones deleted".formatted(marked.refsDeleted()) +
 				(block == null ? ""
 						: ", %d block strings added, %d block references".formatted(
 							block.stringsAdded(), block.references()));
