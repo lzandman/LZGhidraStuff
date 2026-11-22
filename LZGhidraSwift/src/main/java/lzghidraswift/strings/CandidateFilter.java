@@ -28,7 +28,8 @@ public final class CandidateFilter {
 	static final long LARGE_STRING_FLAG = 0x8000_0000_0000_0000L;
 
 	/**
-	 * Candidate instructions of one function. {@code largeStringOrs}: an OR of bit 63 as an
+	 * Candidate instructions of one function. {@code tagWords}: a small-string tag word, or the
+	 * OR of a tag byte ({@link #isTagByte}). {@code largeStringOrs}: an OR of bit 63 as an
 	 * immediate (AArch64 {@code orr}, {@code movk #0x8000, lsl #48}); the OR is then word 1 of a
 	 * large string, if it is one. {@code largeFlagLoads}: bit 63 loaded into a register (x86_64
 	 * {@code movabs}), which a later {@code orq} combines with the address; one load can serve
@@ -48,6 +49,15 @@ public final class CandidateFilter {
 	static boolean hasSmallTag(long value) {
 		int nibble = (int) (value >>> 60);
 		return nibble == 0xE || nibble == 0xA;
+	}
+
+	/**
+	 * True for the constant of {@code orq $-0x1c, %rdi} before {@code shlq $0x38, %rdi}: the
+	 * x86_64 tag word computed from a Bool, ((b & 1) | -0x1c) << 56, count 4 or 5. Its low byte
+	 * is the tag byte, every other bit is set.
+	 */
+	static boolean isTagByte(long value) {
+		return (value | 0xFF) == -1L && hasSmallTag(value << 56);
 	}
 
 	/** Finds the candidate instructions of {@code function}; see {@link Result}. */
@@ -98,7 +108,7 @@ public final class CandidateFilter {
 	}
 
 	private static int constantKind(long v, int opcode) {
-		int kind = hasSmallTag(v) ? TAG : 0;
+		int kind = hasSmallTag(v) || (opcode == PcodeOp.INT_OR && isTagByte(v)) ? TAG : 0;
 		// AArch64 ORs the immediate (orr, or movk #0x8000, lsl #48); x86_64 loads it with movabs
 		// into a register and ORs that register (orq %r14, %rsi).
 		if (v == LARGE_STRING_FLAG) {

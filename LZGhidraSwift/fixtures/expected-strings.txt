@@ -4,8 +4,8 @@
 # The compiler may merge or move literals; compare by function and literal, not by address.
 # libStrings-Onone.dylib builds every literal through String(_builtinStringLiteral:...) from
 # __cstring, so it must give no small-string hits at all.
-# libStrings-x86_64.dylib (-O, x86_64) is checked against the same list. Known miss there:
-# spelling(_:) "Sharp" and "Flat", whose tag word is computed, (b & 1 | -0x1c) << 56, not a constant.
+# libStrings-x86_64.dylib (-O, x86_64) is checked against the same list. There spelling(_:) computes
+# the tag word of "Sharp" and "Flat" from the Bool, (b & 1 | -0x1c) << 56, and selects word 0 with cmovne.
 # waypointName(_:) (added 2026-10-28) switches through a table of byte offsets; Ghidra 12.2 does not
 # recover it on arm64, so 29 of its 30 literals are known misses there (known-differences/strings.txt).
 
