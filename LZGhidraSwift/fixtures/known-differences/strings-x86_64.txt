@@ -5,16 +5,3 @@
 # as a constant (see expected-strings.txt). Apple Swift 6.4 (swiftlang-6.4.0.34.1).
 missing:    spelling(_:)	"Flat"	small
 missing:    spelling(_:)	"Sharp"	small
-#
-# The decompiler types word 0 of String as char * (Ghidra's
-# Swift demangler defines String as { char *str; void *bridgeObject; }) and shows it as an address
-# when its value lies inside the image (base 0, 64 KB): "C" 0x43, "m" 0x6d, "Cb" 0x6243, "é" 0xa9c3,
-# "×" 0x97c3. The equate of word 0 does not show; the .hi equate of word 1 does.
-# On x86_64 "×" has no tag-word instruction of its own: the compiler reuses the register that
-# holds the tag word of "é" (the same value, 0xE2 << 56), so the C shows S"é".hi for it, and
-# neither equate nor comment of "×" ("decompiler none").
-decompiler none:    argNonASCII()	"×"
-decompiler pointer: argLengths()	"Cb"
-decompiler pointer: argLengths()	"m"
-decompiler pointer: argNonASCII()	"é"
-decompiler pointer: noteName()	"C"

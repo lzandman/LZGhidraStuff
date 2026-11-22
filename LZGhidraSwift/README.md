@@ -351,9 +351,12 @@ At the instruction that completes each string (the later of the two words):
 | Bookmark, type Analysis, category `Swift string (small)` or `Swift string (large)` | text `"chord_change"` | Bookmarks |
 | Equates on instruction operands that hold a whole word | `S"Flat"`, `S"Flat".hi` | always (certain small strings) |
 | Equates on the decompiler's constants, by dynamic hash | `*(undefined8 *)(puVar1 + 0x20) = S"chord_change";` | Decompiler equates |
-| PRE comment line at the use, for strings no equate shows | `/* Swift "json" */` above `String::_bridgeToObjectiveC()` | Decompiler equates |
+| PRE comment line at the use, for strings no equate shows, and for small strings whose word 0 the decompiler still shows as a pointer | `/* Swift "json" */` above `String::_bridgeToObjectiveC()` | Decompiler equates |
+| Ghidra's operand reference from the instruction of a small string's word 0 to the address that is its value is deleted (not a user-defined one) | `mov edi,0x6243` no longer refers into a symbol name | always (certain small strings) |
 | Data reference from the `orr` (`or` on x86_64) to the bytes of a large string, unless one of the string's own instructions refers to them; Ghidra's reference from the string's `lea` to the bytes minus 32 is deleted (not a user-defined one) | | Large strings |
 | A UTF-8 string in the block `swift_strings`, defined as data, with a data reference from the completing instruction (small strings only) | `s_chord_change_swift_strings__00000006` | String block (off by default, a workaround) |
+
+Once per program, field 0 (`str`) of Ghidra's `/Demangler/Swift/String` (`{ char *str; void *bridgeObject; }`) becomes `ulonglong`, keeping its name. In Swift this word is the count and flags or the first 8 bytes of the string, never a pointer to characters. With `char *` the decompiler shows every small string whose word 0 is an address in the program as a pointer (`(char *)((long)&segment_command_00000020.vmsize + 3)` for `"C"` in a dylib at base 0), and casts each `S"..."` to `char *`. The change applies to every use of the type in the program; the log says so.
 
 Search → Program Text (comments) finds a string, and the Bookmarks window, filtered on category `Swift string (small)` or `Swift string (large)`, lists them by kind.
 
@@ -424,7 +427,7 @@ The analyzer is checked against a fixture with known answers (`fixtures/Strings.
 
 Known display limits:
 
-- The Swift demangler types word 0 of a `String` argument as `char *`, so the decompiler prints a short string's word 0 as the bytes at that address (`"\x19"` for `"-"` = 0x2d). The `.hi` equate on the same string still shows.
+- With word 0 as `ulonglong` the decompiler still shows it as a pointer when its value lies inside a defined string (`(ulonglong)"utoreleasedReturnValue"` for `"Cb"` = 0x6243 in the x86_64 fixture): it makes such a constant a `char *` and then prints the string, not the equate. These strings get the PRE comment line; the `.hi` equate still shows.
 - Word 1 of a string of 8 bytes or fewer holds only the tag and the count, so all strings of the same length share it (`0xE100…` for every one-byte string). Where two such strings meet in one function, the `.hi` name can name the other one (`S" ".hi` for `"-"`). The comment lines and bookmarks are not affected.
 - Code that the decompiler removes as unreachable shows neither equates nor comments.
 - Probable and large strings, and strings passed to methods whose demangled signature has no parameters (`_bridgeToObjectiveC(void)`), show as PRE comments, not equates.

@@ -24,7 +24,8 @@ A dump also has DECOMP, LARGEREF and LARGEREF-WRONG lines. Errors, one line each
 with the function's demangled name:
 - "decompiler none": the decompiled C shows neither an equate nor the comment
   line of a string;
-- "decompiler pointer": the C shows word 0 of a small string as an address;
+- "decompiler pointer": the C shows word 0 of a small string as an address,
+  and the string has no comment line there;
 - "large ref missing" / "large ref twice": a large string without a reference
   from its function to its bytes, or with more references than it has hits in
   the function;

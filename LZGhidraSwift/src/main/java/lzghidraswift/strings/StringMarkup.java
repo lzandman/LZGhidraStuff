@@ -24,7 +24,9 @@ import lzghidraswift.strings.StringHit.Kind;
  * a bookmark at the instruction that completes each string, an equate on each instruction
  * operand whose scalar is a whole word of a small string ({@code movabs} on x86_64, a single
  * {@code mov} on AArch64), and a data reference to the bytes of a large string if its own
- * instructions have none (Ghidra's references from them to the bytes less 32 are deleted). {@link DecompilerEquates} adds equates on decompiler constants, and
+ * instructions have none (Ghidra's references from them to the bytes less 32 are deleted, and
+ * those from the producer of a small string's word 0 to the address that is its value).
+ * {@link DecompilerEquates} adds equates on decompiler constants, and
  * {@link #addPreLines} a PRE comment line for strings the decompiler does not show. With the
  * string block option, small strings also go into {@link StringBlock}, written by
  * {@link #writeBlock} at the end of the run. Re-running replaces this markup and leaves the rest
@@ -64,14 +66,15 @@ public final class StringMarkup {
 
 	/** What one call of {@link #apply} created. */
 	public record Counts(int comments, int bookmarks, int equates, int refsAdded, int refsPresent,
-			int refsDeleted) {
+			int refsDeleted, int wordRefsDeleted) {
 		public Counts plus(Counts o) {
 			return new Counts(comments + o.comments, bookmarks + o.bookmarks, equates + o.equates,
-				refsAdded + o.refsAdded, refsPresent + o.refsPresent, refsDeleted + o.refsDeleted);
+				refsAdded + o.refsAdded, refsPresent + o.refsPresent, refsDeleted + o.refsDeleted,
+				wordRefsDeleted + o.wordRefsDeleted);
 		}
 	}
 
-	public static final Counts NONE = new Counts(0, 0, 0, 0, 0, 0);
+	public static final Counts NONE = new Counts(0, 0, 0, 0, 0, 0, 0);
 
 	private final Program program;
 	private final Options options;
@@ -238,10 +241,12 @@ public final class StringMarkup {
 		int refsAdded = 0;
 		int refsPresent = 0;
 		int refsDeleted = 0;
+		int wordRefsDeleted = 0;
 		List<StringHit> large = new ArrayList<>();
 		for (StringHit h : marked) {
 			if (h.kind() == Kind.SMALL) {
 				equates += equates(h);
+				wordRefsDeleted += deleteWordReferences(h);
 				if (block != null) {
 					block.add(h.completedAt(), h.text());
 				}
@@ -267,7 +272,8 @@ public final class StringMarkup {
 				refsPresent++;
 			}
 		}
-		return new Counts(comments, bookmarks, equates, refsAdded, refsPresent, refsDeleted);
+		return new Counts(comments, bookmarks, equates, refsAdded, refsPresent, refsDeleted,
+			wordRefsDeleted);
 	}
 
 	/**
@@ -431,6 +437,28 @@ public final class StringMarkup {
 		AddressSpace space = program.getAddressFactory().getDefaultAddressSpace();
 		return new Address[] { space.getAddress(biased + SwiftStringCodec.NATIVE_BIAS),
 			space.getAddress(biased) };
+	}
+
+	/**
+	 * Deletes Ghidra's operand references from the producer of word 0 of a certain small string
+	 * to the address that its value happens to be ({@code mov edi,0x6243} into the middle of a
+	 * symbol name). The reference makes a {@code DAT_} label there, and the decompiler then shows
+	 * word 0 as a pointer to it instead of the equate. Returns the number deleted.
+	 */
+	private int deleteWordReferences(StringHit h) {
+		if (h.method().probable() || h.word0At() == null || h.word0() == 0) {
+			return 0;
+		}
+		ReferenceManager rm = program.getReferenceManager();
+		int deleted = 0;
+		for (Reference r : rm.getReferencesFrom(h.word0At())) {
+			if (r.isMemoryReference() && r.getToAddress().getOffset() == h.word0() &&
+				isDeletable(r)) {
+				rm.delete(r);
+				deleted++;
+			}
+		}
+		return deleted;
 	}
 
 	/**
@@ -602,7 +630,8 @@ public final class StringMarkup {
 	}
 
 	/**
-	 * True for a reference that {@link #deleteWrongReferences} may delete: an operand reference that
+	 * True for a reference that {@link #deleteWrongReferences} and {@link #deleteWordReferences} may
+	* delete: an operand reference that
 	 * Ghidra's analysis made, not one of the user's or a mnemonic one (the analyzer's own).
 	 */
 	static boolean isDeletable(SourceType source, int operandIndex) {

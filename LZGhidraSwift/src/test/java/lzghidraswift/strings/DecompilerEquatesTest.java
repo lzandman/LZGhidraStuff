@@ -12,6 +12,7 @@ import org.junit.Test;
 
 import ghidra.program.model.address.AddressSpace;
 import ghidra.program.model.address.GenericAddressSpace;
+import ghidra.program.model.data.*;
 import lzghidraswift.strings.DecompilerEquates.Ref;
 
 public class DecompilerEquatesTest {
@@ -37,5 +38,19 @@ public class DecompilerEquatesTest {
 			refs.sort(Ref.ORDER);
 			assertEquals(expected, refs);
 		}
+	}
+
+	/** Only char and code pointers lose the equate; other pointers print it with a cast. */
+	@Test
+	public void constantTypesThatHideTheEquate() {
+		assertTrue(
+			DecompilerEquates.printsAsAddress(new PointerDataType(CharDataType.dataType, 8)));
+		assertTrue(DecompilerEquates
+				.printsAsAddress(new PointerDataType(new FunctionDefinitionDataType("f"), 8)));
+		assertFalse(DecompilerEquates
+				.printsAsAddress(new PointerDataType(new StructureDataType("NSBundle", 0), 8)));
+		assertFalse(
+			DecompilerEquates.printsAsAddress(new PointerDataType(VoidDataType.dataType, 8)));
+		assertFalse(DecompilerEquates.printsAsAddress(UnsignedLongLongDataType.dataType));
 	}
 }

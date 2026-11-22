@@ -27,7 +27,9 @@
 //                                                               equate (S"..." without .hi), else
 //                                                               pointer if the statement assigning
 //                                                               it shows an address (&, a symbol or
-//                                                               a quoted string), else none; - for
+//                                                               a quoted string), else none; comment
+//                                                               instead of pointer or none if the C
+//                                                               has the string's comment line; - for
 //                                                               large, empty and probable strings
 //   LARGEREF entry  address  literal  bytes  from,from,...|-   each large string in a bookmark: the
 //                                                               address of its bytes in __cstring
@@ -316,9 +318,13 @@ public class DumpSwiftStrings extends GhidraScript {
 						how = "none";
 						counts[2]++;
 					}
-					out.println(
-						String.join("\t", "DECOMP", f.getEntryPoint().toString(), m[0], m[1],
-							how, m[3].equals("large") ? "-" : word0(c, m[1], literal)));
+					String word0 = m[3].equals("large") ? "-" : word0(c, m[1], literal);
+					if ((word0.equals("pointer") || word0.equals("none")) &&
+						c.contains("Swift " + m[1])) {
+						word0 = "comment";
+					}
+					out.println(String.join("\t", "DECOMP", f.getEntryPoint().toString(), m[0],
+						m[1], how, word0));
 				}
 			}
 		}

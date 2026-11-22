@@ -7,6 +7,7 @@ import java.util.*;
 
 import ghidra.app.decompiler.*;
 import ghidra.program.model.address.Address;
+import ghidra.program.model.data.*;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.pcode.*;
 import ghidra.program.model.symbol.Equate;
@@ -22,8 +23,10 @@ import lzghidraswift.strings.StringHit.Kind;
  * by its dynamic hash, as the decompiler's "Convert constant" action does
  * ({@code ConvertConstantEquateTask}). This also reaches constants that are folded from several
  * instructions ({@code mov}/{@code movk} chains), which have no instruction operand to carry an
- * equate. Reports which strings the decompiler shows, so that the others can get a comment. The
- * decompiling itself is done by {@link DecompilerPool}.
+ * equate. Reports which strings the decompiler shows, so that the others can get a comment, and
+ * which small strings have no constant for word 0 that prints as a number: the decompiler shows
+ * that word as a pointer when its value is the address of a symbol or lies inside a defined
+ * string, and then ignores its equate ({@code ActionConstantPtr}, {@code RulePtrsubCharConstant}). The decompiling itself is done by {@link DecompilerPool}.
  */
 public final class DecompilerEquates {
 
@@ -34,9 +37,12 @@ public final class DecompilerEquates {
 	 */
 	private static final long WEAK_LIMIT = 0x1_0000L;
 
-	/** What happened to the strings of one function. */
-	public record Result(boolean decompiled, String error, Set<StringHit> shown, int added,
-			int present) {}
+	/**
+	 * What happened to the strings of one function. {@code word0Hidden}: the equated hits with a
+	 * word 0 other than 0 that no constant of the decompiled function stands for.
+	 */
+	public record Result(boolean decompiled, String error, Set<StringHit> shown,
+			Set<StringHit> word0Hidden, int added, int present) {}
 
 	/** One word of a string: the value the decompiler may show, and the equate name for it. */
 	private record Word(StringHit hit, long value, String name) {
@@ -47,6 +53,11 @@ public final class DecompilerEquates {
 		/** The string's own instructions: its two producers and its use site. */
 		boolean isOwnAddress(Address a) {
 			return a.equals(hit.word0At()) || a.equals(hit.word1At()) || a.equals(hit.useAt());
+		}
+
+		/** True for word 0, false for the tag word. */
+		boolean isWord0() {
+			return !name.endsWith(".hi");
 		}
 	}
 
@@ -87,20 +98,22 @@ public final class DecompilerEquates {
 		private final boolean decompiled;
 		private final String error;
 		private final Set<StringHit> present;
+		private final Set<StringHit> word0Hidden;
 		private final int presentCount;
 		private final List<Ref> refs;
 
-		private Plan(boolean decompiled, String error, Set<StringHit> present, int presentCount,
-				List<Ref> refs) {
+		private Plan(boolean decompiled, String error, Set<StringHit> present,
+				Set<StringHit> word0Hidden, int presentCount, List<Ref> refs) {
 			this.decompiled = decompiled;
 			this.error = error;
 			this.present = present;
+			this.word0Hidden = word0Hidden;
 			this.presentCount = presentCount;
 			this.refs = refs;
 		}
 
 		private static Plan failed(String error) {
-			return new Plan(false, error, Set.of(), 0, List.of());
+			return new Plan(false, error, Set.of(), Set.of(), 0, List.of());
 		}
 	}
 
@@ -123,7 +136,7 @@ public final class DecompilerEquates {
 			words.add(new Word(h, h.word1(), StringMarkup.equateNameHi(h.text())));
 		}
 		if (words.isEmpty()) {
-			return new Plan(true, null, Set.of(), 0, List.of());
+			return new Plan(true, null, Set.of(), Set.of(), 0, List.of());
 		}
 		if (res == null) {
 			return Plan.failed("decompiler did not start");
@@ -138,19 +151,25 @@ public final class DecompilerEquates {
 			PcodeOp op = ops.next();
 			for (int i = 0; i < op.getNumInputs(); i++) {
 				Varnode vn = op.getInput(i);
-				if (vn != null && vn.isConstant() && !isSpaceSlot(op, i)) {
+				if (vn != null && vn.isConstant() && !isSpaceSlot(op, i) && !isPointerOp(op)) {
 					pass.mark(vn, op.getSeqnum().getTarget());
 				}
 			}
 		}
 		pass.refs.sort(Ref.ORDER);
-		return new Plan(true, null, pass.present, pass.presentCount, pass.refs);
+		Set<StringHit> hidden = new HashSet<>();
+		for (Word w : words) {
+			if (w.isWord0() && !pass.word0Seen.contains(w.hit())) {
+				hidden.add(w.hit());
+			}
+		}
+		return new Plan(true, null, pass.present, hidden, pass.presentCount, pass.refs);
 	}
 
 	/** Adds the equate references of {@code plan} to the program. */
 	public Result apply(Plan plan) {
 		if (!plan.decompiled) {
-			return new Result(false, plan.error, Set.of(), 0, 0);
+			return new Result(false, plan.error, Set.of(), Set.of(), 0, 0);
 		}
 		EquateTable table = program.getEquateTable();
 		Set<StringHit> shown = new HashSet<>(plan.present);
@@ -161,7 +180,7 @@ public final class DecompilerEquates {
 				added++;
 			}
 		}
-		return new Result(true, null, shown, added, plan.presentCount);
+		return new Result(true, null, shown, plan.word0Hidden, added, plan.presentCount);
 	}
 
 	/** One {@link #plan}: the decompiled function, its words and what was found. */
@@ -170,6 +189,8 @@ public final class DecompilerEquates {
 		final List<Word> words;
 		final Map<String, List<StringHit>> byName = new HashMap<>();
 		final Set<StringHit> present = new HashSet<>();
+		/** The hits whose word 0 a constant stands for, by an equate or a planned reference. */
+		final Set<StringHit> word0Seen = new HashSet<>();
 		final List<Ref> refs = new ArrayList<>();
 		int presentCount;
 
@@ -185,12 +206,16 @@ public final class DecompilerEquates {
 		void mark(Varnode vn, Address at) {
 			HighVariable high = vn.getHigh();
 			HighSymbol sym = high == null ? null : high.getSymbol();
+			boolean pointer = high != null && printsAsAddress(high.getDataType());
 			if (sym instanceof EquateSymbol) {
 				// An equate already shows here: ours from the listing markup, or the user's.
 				List<StringHit> named = byName.get(sym.getName());
 				if (named != null) {
 					present.addAll(named);
 					presentCount++;
+					if (!sym.getName().endsWith(".hi") && !pointer) {
+						word0Seen.addAll(named);
+					}
 				}
 				return;
 			}
@@ -198,14 +223,45 @@ public final class DecompilerEquates {
 				return;
 			}
 			Word w = pick(words, vn.getOffset(), at);
-			if (w == null) {
+			if (w == null || (w.isWord0() && pointer)) {
 				return;
 			}
 			DynamicHash dh = new DynamicHash(vn, hf);
 			if (dh.getHash() != 0 && dh.getAddress() != null) {
 				refs.add(new Ref(w, dh.getHash(), dh.getAddress()));
+				if (w.isWord0()) {
+					word0Seen.add(w.hit());
+				}
 			}
 		}
+	}
+
+	/**
+	 * PTRSUB and PTRADD: the decompiler has made the constant a pointer ({@code &DAT_0000a9c3},
+	 * {@code "cidentalOWV"}), and prints no equate on it.
+	 */
+	private static boolean isPointerOp(PcodeOp op) {
+		return op.getOpcode() == PcodeOp.PTRSUB || op.getOpcode() == PcodeOp.PTRADD;
+	}
+
+	/**
+	 * True for a constant type that the decompiler prints as a string or a function name, never
+	 * as the constant's equate ({@code PrintC::pushConstant}): a pointer to characters or code.
+	 * {@code RulePtrsubCharConstant} makes a pointer into a string such a constant. Other
+	 * pointers print as a cast of the equate ({@code (NSBundle *)S"FluentUI"}). Word 0 counts as
+	 * shown only on another type.
+	 */
+	static boolean printsAsAddress(DataType t) {
+		if (!(t instanceof Pointer p)) {
+			return false;
+		}
+		DataType to = p.getDataType();
+		if (to instanceof TypeDef td) {
+			to = td.getBaseDataType();
+		}
+		return to instanceof CharDataType || to instanceof WideCharDataType ||
+			to instanceof WideChar16DataType || to instanceof WideChar32DataType ||
+			to instanceof FunctionDefinition;
 	}
 
 	/** Slot 0 of LOAD and STORE is the address space id, not a value. */

@@ -43,13 +43,3 @@ unexpected: FUN_00000fb8	"tempo_change"	small
 unexpected: FUN_00001158	"Füße"	small
 unexpected: FUN_00001158	"×"	small
 unexpected: FUN_00001158	"é"	small
-#
-# The decompiler types word 0 of String as char * (Ghidra's
-# Swift demangler defines String as { char *str; void *bridgeObject; }) and shows it as an address
-# when its value lies inside the image (base 0, 64 KB): "C" 0x43, "m" 0x6d, "Cb" 0x6243, "é" 0xa9c3,
-# "×" 0x97c3. The equate of word 0 does not show; the .hi equate of word 1 does.
-decompiler pointer: FUN_00000fb8	"Cb"
-decompiler pointer: FUN_00000fb8	"m"
-decompiler pointer: FUN_00001158	"×"
-decompiler pointer: FUN_00001158	"é"
-decompiler pointer: noteName()	"C"
