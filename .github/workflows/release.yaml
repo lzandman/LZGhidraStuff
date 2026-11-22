@@ -1,5 +1,9 @@
 # Builds both extensions for every Ghidra version in build.yaml's matrix and attaches the zips
 # to a draft GitHub release. Nothing is public until the draft is published by hand.
+# Order: build (build.yaml, Linux) → fixtures (fixtures.yaml on the LZGhidraSwift zip that build
+# uploaded, macOS, about 12½ minutes more per release) → package. If a fixture check fails, package
+# does not run and nothing is drafted. package copies the zips unchanged, so the SHA-256 that the
+# fixtures job prints is the one in SHA256SUMS.
 #
 # Release: push a tag such as v1.0.0; a tag with a hyphen (v1.0.0-rc.1) drafts a pre-release.
 # Dry run: start this workflow by hand (Actions tab, or `gh workflow run release.yaml`); it
@@ -24,9 +28,18 @@ jobs:
     name: Build
     uses: ./.github/workflows/build.yaml
 
+  fixtures:
+    name: Fixtures
+    needs: build
+    uses: ./.github/workflows/fixtures.yaml
+    permissions:
+      contents: read
+    with:
+      build-zip: true
+
   package:
     name: Package and draft release
-    needs: build
+    needs: [build, fixtures]
     runs-on: ubuntu-latest
     permissions:
       contents: write
