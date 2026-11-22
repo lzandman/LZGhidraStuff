@@ -93,7 +93,7 @@ jobs:
             attest=""
           fi
           cat > notes.md <<EOF
-          ## Which zip
+          ## Extensions
 
           - **LZGhidraSwift**: analyzers for Swift binaries. They decode Swift string literals built in code, create data types for Swift structs, classes and enums, type the \`self\` parameter of methods, give throwing functions a calling convention that keeps their catch paths in the decompiler, and give the Swift runtime functions their signatures.
           - **LZGhidraGeneric**: creates functions from the Mach-O function-starts table in images extracted from the dyld shared cache. Install it as well when you analyse such images with LZGhidraSwift; without it, part of their code stays outside functions.
