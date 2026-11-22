@@ -20,8 +20,8 @@ import ghidra.program.model.data.*;
  */
 public final class DemanglerStringType {
 
-	public static final CategoryPath CATEGORY = new CategoryPath("/Demangler/Swift");
-	public static final List<String> NAMES = List.of("String", "Character");
+	static final CategoryPath CATEGORY = new CategoryPath("/Demangler/Swift");
+	static final List<String> NAMES = List.of("String", "Character");
 
 	private DemanglerStringType() {
 	}

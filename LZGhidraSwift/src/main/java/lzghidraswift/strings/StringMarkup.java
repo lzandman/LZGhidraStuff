@@ -112,9 +112,17 @@ public final class StringMarkup {
 		return "S" + SwiftStringCodec.quote(text);
 	}
 
+	/** The suffix of {@link #equateNameHi}. */
+	private static final String HI_SUFFIX = ".hi";
+
 	/** The equate name of word 1 (the tag word): {@code S"Flat".hi}. */
 	static String equateNameHi(String text) {
-		return equateName(text) + ".hi";
+		return equateName(text) + HI_SUFFIX;
+	}
+
+	/** True for an equate name of {@link #equateNameHi}, false for one of word 0. */
+	static boolean isEquateNameHi(String name) {
+		return name.endsWith(HI_SUFFIX);
 	}
 
 	static boolean isOwnEquate(String name) {
@@ -431,12 +439,16 @@ public final class StringMarkup {
 		return -1;
 	}
 
-	/** The address of a large string's bytes, and of the bytes less 32 (word 1 without the flag). */
-	private Address[] bytesAndBiased(StringHit h) {
-		long biased = h.word1() & ~SwiftStringCodec.LARGE_OBJECT_FLAG;
-		AddressSpace space = program.getAddressFactory().getDefaultAddressSpace();
-		return new Address[] { space.getAddress(biased + SwiftStringCodec.NATIVE_BIAS),
-			space.getAddress(biased) };
+	/** The address of a large string's bytes. */
+	private Address bytesOf(StringHit h) {
+		return biasedOf(h).add(SwiftStringCodec.NATIVE_BIAS);
+	}
+
+	/** The address of a large string's bytes less 32: word 1 without the flag. */
+	private Address biasedOf(StringHit h) {
+		return program.getAddressFactory()
+				.getDefaultAddressSpace()
+				.getAddress(h.word1() & ~SwiftStringCodec.LARGE_OBJECT_FLAG);
 	}
 
 	/**
@@ -467,7 +479,7 @@ public final class StringMarkup {
 	 * Returns the number deleted.
 	 */
 	private int deleteWrongReferences(StringHit h, Set<Address> own) {
-		Address wrong = bytesAndBiased(h)[1];
+		Address wrong = biasedOf(h);
 		ReferenceManager rm = program.getReferenceManager();
 		int deleted = 0;
 		for (Address a : own) {
@@ -489,7 +501,7 @@ public final class StringMarkup {
 	 * one's bytes. Returns true if added.
 	 */
 	private boolean addReference(StringHit h, Set<Address> own) {
-		Address str = bytesAndBiased(h)[0];
+		Address str = bytesOf(h);
 		ReferenceManager rm = program.getReferenceManager();
 		for (Address a : own) {
 			for (Reference r : rm.getReferencesFrom(a)) {
@@ -630,9 +642,9 @@ public final class StringMarkup {
 	}
 
 	/**
-	 * True for a reference that {@link #deleteWrongReferences} and {@link #deleteWordReferences} may
-	* delete: an operand reference that
-	 * Ghidra's analysis made, not one of the user's or a mnemonic one (the analyzer's own).
+	 * True for a reference that {@link #deleteWrongReferences} and {@link #deleteWordReferences}
+	 * may delete: an operand reference that Ghidra's analysis made, not one of the user's or a
+	 * mnemonic one (the analyzer's own).
 	 */
 	static boolean isDeletable(SourceType source, int operandIndex) {
 		return operandIndex >= 0 && (source == SourceType.DEFAULT || source == SourceType.ANALYSIS);

@@ -26,7 +26,8 @@ import lzghidraswift.strings.StringHit.Kind;
  * equate. Reports which strings the decompiler shows, so that the others can get a comment, and
  * which small strings have no constant for word 0 that prints as a number: the decompiler shows
  * that word as a pointer when its value is the address of a symbol or lies inside a defined
- * string, and then ignores its equate ({@code ActionConstantPtr}, {@code RulePtrsubCharConstant}). The decompiling itself is done by {@link DecompilerPool}.
+ * string, and then ignores its equate ({@code ActionConstantPtr},
+ * {@code RulePtrsubCharConstant}). The decompiling itself is done by {@link DecompilerPool}.
  */
 public final class DecompilerEquates {
 
@@ -57,7 +58,7 @@ public final class DecompilerEquates {
 
 		/** True for word 0, false for the tag word. */
 		boolean isWord0() {
-			return !name.endsWith(".hi");
+			return !StringMarkup.isEquateNameHi(name);
 		}
 	}
 
@@ -213,7 +214,7 @@ public final class DecompilerEquates {
 				if (named != null) {
 					present.addAll(named);
 					presentCount++;
-					if (!sym.getName().endsWith(".hi") && !pointer) {
+					if (!StringMarkup.isEquateNameHi(sym.getName()) && !pointer) {
 						word0Seen.addAll(named);
 					}
 				}
