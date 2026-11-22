@@ -30,6 +30,7 @@ import lzghidraswift.metadata.SymbolNames;
 import lzghidraswift.strings.CandidateFilter;
 import lzghidraswift.strings.DecompilerEquates;
 import lzghidraswift.strings.DecompilerPool;
+import lzghidraswift.strings.DemanglerStringType;
 import lzghidraswift.strings.FallbackPairer;
 import lzghidraswift.strings.LargeStringFinder;
 import lzghidraswift.strings.RegisterPairFinder;
@@ -176,8 +177,11 @@ public class SwiftStringLiteralsAnalyzer extends AbstractAnalyzer {
 		StringBlock.Result block;
 		/** Decompiler equates: functions decompiled, of which failed. */
 		int decompiled, decompileFailed;
-		/** Decompiler equates: references added and present, hits shown, pre comment lines. */
-		int equatesAdded, equatesPresent, shown, preLines;
+		/**
+		 * Decompiler equates: references added and present, hits shown, hits whose word 0 the
+		 * decompiler shows as a pointer, pre comment lines.
+		 */
+		int equatesAdded, equatesPresent, shown, word0Hidden, preLines;
 		/**
 		 * Wall time of the decompiler pass: decompiling on the worker threads, then applying
 		 * the results and logging the held lines on the analysis thread.
@@ -206,8 +210,10 @@ public class SwiftStringLiteralsAnalyzer extends AbstractAnalyzer {
 		String markupSummary() {
 			return "markup: %d comments, %d bookmarks, %d operand equates, ".formatted(
 				marked.comments(), marked.bookmarks(), marked.equates()) +
-				"%d large-string references added, %d present".formatted(marked.refsAdded(),
+				"%d large-string references added, %d present, ".formatted(marked.refsAdded(),
 					marked.refsPresent()) +
+				"%d wrong ones deleted, ".formatted(marked.refsDeleted()) +
+				"%d word 0 references deleted".formatted(marked.wordRefsDeleted()) +
 				(block == null ? ""
 						: ", %d block strings added, %d block references".formatted(
 							block.stringsAdded(), block.references()));
@@ -219,8 +225,9 @@ public class SwiftStringLiteralsAnalyzer extends AbstractAnalyzer {
 				decompileFailed) +
 				"%d equate references added, %d present, ".formatted(equatesAdded,
 					equatesPresent) +
-				"%d strings shown by equates, %d pre comments; %.3f s".formatted(shown, preLines,
-					decompSeconds);
+				"%d strings shown by equates, %d with word 0 as a pointer, ".formatted(shown,
+					word0Hidden) +
+				"%d pre comments; %.3f s".formatted(preLines, decompSeconds);
 		}
 	}
 
@@ -231,6 +238,10 @@ public class SwiftStringLiteralsAnalyzer extends AbstractAnalyzer {
 		Counts counts = new Counts();
 		AnalysisLog warnings = new AnalysisLog(this, log);
 		StringMarkup markup = new StringMarkup(program, markupOptions);
+		for (String type : DemanglerStringType.retype(program.getDataTypeManager())) {
+			Msg.info(this, NAME + ": field 0 (str) of " + type + " retyped from a pointer to " +
+				"ulonglong, in every use of the type: word 0 of a Swift String is never a pointer");
+		}
 		// Progress by function: count them first (cheap next to the analysis itself).
 		Progress.start(monitor, NAME, "functions", Progress.functions(program, set));
 		boolean decompiler = markupOptions.decompilerEquates();
@@ -404,7 +415,8 @@ public class SwiftStringLiteralsAnalyzer extends AbstractAnalyzer {
 
 	/**
 	 * Applies the decompiler equates of one function: equates for the marked hits, and a PRE
-	 * comment line at the use of each marked hit that no equate shows. Logs one
+	 * comment line at the use of each marked hit that no equate shows, or whose word 0 the
+	 * decompiler shows as a pointer. Logs one
 	 * SWIFTSTR-DECOMP line per hit.
 	 */
 	private void decompile(DecompilerEquates equates, StringMarkup markup, Job job,
@@ -431,7 +443,12 @@ public class SwiftStringLiteralsAnalyzer extends AbstractAnalyzer {
 		counts.equatesPresent += r.present();
 		List<StringHit> comment = new ArrayList<>();
 		for (StringHit h : marked) {
-			boolean shown = r.shown().contains(h);
+			// Shown by the equate of word 1 only: word 0 shows as a pointer.
+			boolean hidden = r.shown().contains(h) && r.word0Hidden().contains(h);
+			boolean shown = r.shown().contains(h) && !hidden;
+			if (hidden) {
+				counts.word0Hidden++;
+			}
 			if (shown) {
 				counts.shown++;
 			}

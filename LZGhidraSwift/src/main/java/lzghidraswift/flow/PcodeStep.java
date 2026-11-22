@@ -71,6 +71,7 @@ final class PcodeStep {
 	private final List<Register> volatileRegs = new ArrayList<>();
 	private final List<Register> pointerRegs;
 	private final Map<List<Object>, Long> valueNumbers = new HashMap<>();
+	private final Booleans booleans = new Booleans(this::number);
 
 	private Instruction cur;
 	private boolean recording;
@@ -166,8 +167,11 @@ final class PcodeStep {
 				}
 				i += rel;
 			}
-			else if (opc == PcodeOp.CBRANCH && op.getInput(0).isConstant()) {
-				i = conditionalBranch(s, op, i, todo);
+			else if (opc == PcodeOp.CBRANCH &&
+				(op.getInput(0).isConstant() || skipsRest(op.getInput(0)))) {
+				int rel = op.getInput(0).isConstant() ? relativeTarget(op.getInput(0))
+						: ops.length - i;
+				i = conditionalBranch(s, op, i, rel, todo);
 				if (i == DEAD) {
 					return null;
 				}
@@ -186,10 +190,10 @@ final class PcodeStep {
 	/**
 	 * An internal conditional branch at p-code index {@code i}: follows a known condition, else
 	 * pushes the taken side (with the condition's label) and continues with the other. Returns
-	 * the next index, {@link #STOP} or {@link #DEAD}.
+	 * the next index, {@link #STOP} or {@link #DEAD}. {@code rel} is the target relative to
+	 * {@code i}.
 	 */
-	private int conditionalBranch(State s, PcodeOp op, int i, Deque<Path> todo) {
-		int rel = relativeTarget(op.getInput(0));
+	private int conditionalBranch(State s, PcodeOp op, int i, int rel, Deque<Path> todo) {
 		List<Value> cond = read(s, op.getInput(1));
 		Boolean known = constantTruth(cond);
 		if (known != null) {
@@ -221,6 +225,15 @@ final class PcodeStep {
 		}
 		s.pathLabels = lf;
 		return i + 1;
+	}
+
+	/**
+	 * True if a branch to {@code target} skips the rest of the current instruction's p-code: x86
+	 * {@code cmov} branches to the next instruction's address ({@code CBRANCH (ram, next)}) when
+	 * the condition fails. Its two paths are run like those of AArch64 {@code csel}.
+	 */
+	private boolean skipsRest(Varnode target) {
+		return target.isAddress() && target.getAddress().equals(cur.getMaxAddress().next());
 	}
 
 	/** Reports each register that {@code instr} set to a single constant it produced. */
@@ -550,6 +563,9 @@ final class PcodeStep {
 	/** The bytes {@code off .. off + size} of the constants in the slot at {@code eoff}. */
 	private List<Value> extract(long eoff, Slot slot, long off, int size) {
 		int shift = (int) (off - eoff) * 8;
+		if (shift == 0 && slot.values().size() == 1 && !slot.values().getFirst().isConst()) {
+			return List.of(lowBytes(slot.values().getFirst(), size));
+		}
 		List<Value> result = new ArrayList<>();
 		for (Value v : slot.values()) {
 			if (!v.isConst()) {
@@ -559,6 +575,20 @@ final class PcodeStep {
 			result.add(new Value(k, null, v.producer(), v.labels()));
 		}
 		return dedupe(result);
+	}
+
+	/**
+	 * The low {@code size} bytes of the symbolic value {@code v}: a boolean itself, else one
+	 * value-numbered symbol for every read of them, so that {@code testb $1, %r14b} and a later
+	 * {@code notb %r14b} see the same bit 0.
+	 */
+	private Value lowBytes(Value v, int size) {
+		if (booleans.isBoolean(v)) {
+			return v;
+		}
+		Sym low = number(List.of("low", v.sym(), v.k(), size));
+		booleans.truncated(low, v);
+		return new Value(0, low, null, v.labels());
 	}
 
 	private static boolean hasOverlap(State s, long off, int size) {
@@ -571,9 +601,11 @@ final class PcodeStep {
 		return false;
 	}
 
-	private static void write(State s, Varnode out, List<Value> vals, Set<Varnode> written) {
+	private void write(State s, Varnode out, List<Value> vals, Set<Varnode> written) {
 		if (out.isRegister()) {
-			writeReg(s, out.getOffset(), out.getSize(), vals);
+			if (!writePart(s, out, vals)) {
+				writeReg(s, out.getOffset(), out.getSize(), vals);
+			}
 			written.add(out);
 		}
 		else if (out.isUnique()) {
@@ -582,6 +614,45 @@ final class PcodeStep {
 		else if (out.isAddress()) {
 			s.mem.put(new MemKey(null, out.getOffset(), out.getSize()), vals);
 		}
+	}
+
+	/**
+	 * Writes constants (or a boolean, split into its two) into part of a larger register slot that
+	 * holds constants, keeping the other bytes: {@code xorl %ebx, %ebx; setne %bl} leaves RBX
+	 * 0 or 1. Returns false, writing nothing, if the write is not such a part.
+	 */
+	private boolean writePart(State s, Varnode out, List<Value> vals) {
+		long off = out.getOffset();
+		int size = out.getSize();
+		Map.Entry<Long, Slot> cover = coveringSlot(s, off, size);
+		if (cover == null || cover.getValue().size() <= size ||
+			!cover.getValue().values().stream().allMatch(Value::isConst)) {
+			return false;
+		}
+		List<Value> parts = vals.size() == 1 && booleans.isBoolean(vals.getFirst())
+				? Booleans.split(vals.getFirst(), cur.getAddress())
+				: vals;
+		if (!parts.stream().allMatch(Value::isConst)) {
+			return false;
+		}
+		int shift = (int) (off - cover.getKey()) * 8;
+		long partMask = mask(size) << shift;
+		List<Value> result = new ArrayList<>();
+		for (Value whole : cover.getValue().values()) {
+			for (Value part : parts) {
+				Map<Sym, Long> l = joinLabels(whole.labels(), part.labels());
+				if (l != null) {
+					long k = (whole.k() & ~partMask) | ((part.k() << shift) & partMask);
+					result.add(new Value(k & mask(cover.getValue().size()), null, cur.getAddress(),
+						l));
+				}
+			}
+		}
+		if (result.isEmpty() || result.size() > MAX_VALUES) {
+			return false;
+		}
+		writeReg(s, cover.getKey(), cover.getValue().size(), dedupe(result));
+		return true;
 	}
 
 	private static void writeReg(State s, long off, int size, List<Value> vals) {
@@ -622,8 +693,16 @@ final class PcodeStep {
 	private List<Value> evaluateUnary(State s, PcodeOp op, int index, UnaryOpBehavior unary) {
 		int outSize = op.getOutput().getSize();
 		Varnode in0 = op.getInput(0);
+		List<Value> in = read(s, in0);
+		if (in.size() == 1 && booleans.isBoolean(in.getFirst()) &&
+			op.getOpcode() != PcodeOp.BOOL_NEGATE) {
+			if (Booleans.keeps(op.getOpcode())) {
+				return in;
+			}
+			in = Booleans.split(in.getFirst(), cur.getAddress()); // not, neg of a 0/1
+		}
 		List<Value> result = new ArrayList<>();
-		for (Value v : read(s, in0)) {
+		for (Value v : in) {
 			if (v.isConst()) {
 				long r = unary.evaluateUnary(outSize, in0.getSize(), v.k()) & mask(outSize);
 				result.add(new Value(r, null, r == v.k() ? v.producer() : cur.getAddress(),
@@ -644,8 +723,18 @@ final class PcodeStep {
 		int outSize = op.getOutput().getSize();
 		Varnode in0 = op.getInput(0);
 		Varnode in1 = op.getInput(1);
+		if ((op.getOpcode() == PcodeOp.INT_XOR || op.getOpcode() == PcodeOp.INT_SUB) &&
+			in0.equals(in1)) {
+			return List.of(new Value(0, null, cur.getAddress(), Map.of())); // xorl %ebx, %ebx
+		}
 		List<Value> a = read(s, in0);
 		List<Value> b = read(s, in1);
+		Value bool = booleanResult(op.getOpcode(), a, b);
+		if (bool != null) {
+			return List.of(bool);
+		}
+		a = splitBoolean(a, b);
+		b = splitBoolean(b, a);
 		if (a.size() * b.size() > MAX_COMBINATIONS) {
 			return List.of(fresh(index));
 		}
@@ -670,6 +759,39 @@ final class PcodeStep {
 	}
 
 	/**
+	 * The boolean result of a binary op on one single value and one constant, or null: bit 0 of
+	 * a symbol ({@code x & 1}), or a boolean compared with or masked by a constant that gives
+	 * the boolean or its negation ({@code ZF = (b & 1) == 0}).
+	 */
+	private Value booleanResult(int opcode, List<Value> a, List<Value> b) {
+		if (a.size() != 1 || b.size() != 1) {
+			return null;
+		}
+		Value x = a.getFirst().isConst() ? b.getFirst() : a.getFirst();
+		Value c = a.getFirst().isConst() ? a.getFirst() : b.getFirst();
+		if (x.isConst() || !c.isConst() || joinLabels(x.labels(), c.labels()) == null) {
+			return null;
+		}
+		if (booleans.isBoolean(x)) {
+			return Booleans.withConstant(opcode, x, c.k());
+		}
+		return opcode == PcodeOp.INT_AND && c.k() == 1 ? booleans.bit0(x) : null;
+	}
+
+	/**
+	 * {@code vals}, or the two constants of the boolean if {@code vals} is one boolean and
+	 * {@code other} holds constants only: {@code orq $-0x1c, %rbx} on the 0 or 1 of a
+	 * {@code setne} gives two tag words.
+	 */
+	private List<Value> splitBoolean(List<Value> vals, List<Value> other) {
+		if (vals.size() != 1 || !booleans.isBoolean(vals.getFirst()) ||
+			!other.stream().allMatch(Value::isConst)) {
+			return vals;
+		}
+		return Booleans.split(vals.getFirst(), cur.getAddress());
+	}
+
+	/**
 	 * The symbol for a pure operation whose result is not tracked. If every input has a single
 	 * value, equal operations on equal inputs get the same symbol (value numbering), wherever
 	 * they are. This matters for conditions such as AArch64 {@code gt}, which the p-code of each
@@ -681,6 +803,7 @@ final class PcodeStep {
 		key.add(op.getOpcode());
 		key.add(op.getOutput().getSize());
 		Map<Sym, Long> labels = Map.of();
+		List<Value> inputs = new ArrayList<>();
 		for (Varnode in : op.getInputs()) {
 			List<Value> vals = read(s, in);
 			if (vals.size() != 1) {
@@ -694,9 +817,17 @@ final class PcodeStep {
 			key.add(in.getSize());
 			key.add(v.sym() != null ? v.sym() : "const");
 			key.add(v.k());
+			inputs.add(v);
 		}
+		Sym sym = number(key);
+		booleans.numbered(op.getOpcode(), op.getOutput().getSize(), sym, inputs);
+		return List.of(new Value(0, sym, null, labels));
+	}
+
+	/** The value-numbered symbol of {@code key}: the same for equal keys within the function. */
+	private Sym number(List<Object> key) {
 		long id = valueNumbers.computeIfAbsent(key, k -> (long) valueNumbers.size());
-		return List.of(new Value(0, new Sym(SymKind.NUMBERED, id, 0), null, labels));
+		return new Sym(SymKind.NUMBERED, id, 0);
 	}
 
 	private List<Value> limit(List<Value> vals, int index) {
@@ -751,8 +882,6 @@ final class PcodeStep {
 		Comparator<Sym> order = Comparator.comparing(Sym::kind)
 				.thenComparingLong(Sym::a)
 				.thenComparingLong(Sym::b);
-		List<Object> key = order.compare(a, b) <= 0 ? List.of("sum", a, b) : List.of("sum", b, a);
-		long id = valueNumbers.computeIfAbsent(key, k -> (long) valueNumbers.size());
-		return new Sym(SymKind.NUMBERED, id, 0);
+		return number(order.compare(a, b) <= 0 ? List.of("sum", a, b) : List.of("sum", b, a));
 	}
 }

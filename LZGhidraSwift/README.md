@@ -328,14 +328,16 @@ It prints its reports to standard error: parameter count mismatches between the 
 Swift passes and stores a `String` as two 64-bit words. For a literal, the compiler builds both words from immediates, so the text never appears as a string in the binary:
 
 - **Small strings** (up to 15 UTF-8 bytes): the bytes are the words themselves. `"chord_change"` is `0x68635f64726f6863`, `0xec00000065676e61`; the top byte `0xEC` of word 1 is the tag (ASCII, small) and the count (12). Ghidra's string search does not find these, and the decompiler shows two hex constants.
-- **Large strings** (16 bytes or more): the bytes are in `__cstring`, but word 1 is the address of the bytes minus 32, with bit 63 set, and word 0 is the count with flags (`0xD000…` | count for ASCII). Ghidra adds no reference from the code to the bytes.
+- **Large strings** (16 bytes or more): the bytes are in `__cstring`, but word 1 is the address of the bytes minus 32, with bit 63 set, and word 0 is the count with flags (`0xD000…` | count for ASCII). Ghidra adds no reference from the code to the bytes; on x86_64 it adds one from the `lea` to the bytes minus 32, which is the previous literal when literals are packed.
 
-The analyzer runs a value-set data flow over the p-code of each function that has a candidate constant (a tag-like value or bit 63 moved or ORed into a register). It pairs word 0 and word 1 where the string is used:
+The analyzer runs a value-set data flow over the p-code of each function that has a candidate constant (a tag-like value or bit 63 moved or ORed into a register, or a tag byte ORed in before a shift by 56). It pairs word 0 and word 1 where the string is used:
 
 1. at a call or a tail branch, in two adjacent argument registers, or in the last argument register and the first stack slot, or in two stack slots (x0–x7 then `[sp]`; rdi, rsi, rdx, rcx, r8, r9 then `[rsp+8]`);
 2. at a return, in two adjacent result registers;
 3. at two stores, word 1 eight bytes after word 0 at the same base (dictionary literals, struct fields);
 4. at a comparison with a literal, which the compiler inlines as a comparison of both words (`cmp`/`ccmp` on arm64; `xor`, `xor`, `or` on x86_64).
+
+A conditional select (`csel` on arm64, `cmov` on x86_64) gives a register two values, each labelled with the condition, and two words pair only if their labels agree. A 0 or 1 from a compare or from bit 0 of a value (`setne`, `b & 1`, also after `not`) is split into its two values in the same way where the code combines it with a constant. On x86_64, `b ? "Sharp" : "Flat"` selects word 0 with `cmovne` and computes the tag word as `((b & 1) | -0x1c) << 56`, count 4 or 5; the labels pair "Flat" with count 4 and "Sharp" with count 5.
 
 A tag word that pairs nowhere is paired by guess if exactly one other constant in its basic block decodes with it ("probable", count 1–8 only), or stands alone for the empty string (count 0).
 
@@ -351,9 +353,12 @@ At the instruction that completes each string (the later of the two words):
 | Bookmark, type Analysis, category `Swift string (small)` or `Swift string (large)` | text `"chord_change"` | Bookmarks |
 | Equates on instruction operands that hold a whole word | `S"Flat"`, `S"Flat".hi` | always (certain small strings) |
 | Equates on the decompiler's constants, by dynamic hash | `*(undefined8 *)(puVar1 + 0x20) = S"chord_change";` | Decompiler equates |
-| PRE comment line at the use, for strings no equate shows | `/* Swift "json" */` above `String::_bridgeToObjectiveC()` | Decompiler equates |
-| Data reference from the `orr` to the bytes of a large string | | Large strings |
+| PRE comment line at the use, for strings no equate shows, and for small strings whose word 0 the decompiler still shows as a pointer | `/* Swift "json" */` above `String::_bridgeToObjectiveC()` | Decompiler equates |
+| Ghidra's operand reference from the instruction of a small string's word 0 to the address that is its value is deleted (not a user-defined one) | `mov edi,0x6243` no longer refers into a symbol name | always (certain small strings) |
+| Data reference from the `orr` (`or` on x86_64) to the bytes of a large string, unless one of the string's own instructions refers to them; Ghidra's reference from the string's `lea` to the bytes minus 32 is deleted (not a user-defined one) | | Large strings |
 | A UTF-8 string in the block `swift_strings`, defined as data, with a data reference from the completing instruction (small strings only) | `s_chord_change_swift_strings__00000006` | String block (off by default, a workaround) |
+
+Once per program, field 0 (`str`) of Ghidra's `/Demangler/Swift/String` and `/Demangler/Swift/Character` (both `{ char *str; void *bridgeObject; }`) becomes `ulonglong`, keeping its name. In Swift this word is the count and flags or the first 8 bytes of the string, never a pointer to characters. With `char *` the decompiler shows every small string whose word 0 is an address in the program as a pointer (`(char *)((long)&segment_command_00000020.vmsize + 3)` for `"C"` in a dylib at base 0), and casts each `S"..."` to `char *`. The change applies to every use of the types in the program; the log says so.
 
 Search → Program Text (comments) finds a string, and the Bookmarks window, filtered on category `Swift string (small)` or `Swift string (large)`, lists them by kind.
 
@@ -416,7 +421,7 @@ The analyzer is checked against a fixture with known answers (`fixtures/Strings.
 ### What it misses
 
 - Strings that are not built in code: array and dictionary literals in `__DATA_CONST,__const`, and word 0 loaded from such a table (`ldr x0, [x9, x8, lsl #3]` in an enum's `rawValue`).
-- Tag words computed at run time, such as `(b & 1 | -0x1c) << 56` for `b ? "Sharp" : "Flat"` on x86_64 (arm64 uses `csel` between two constants, which the analyzer handles). Seen only in the test fixture.
+- Tag words computed at run time from a byte that nothing shows to be 0 or 1: x86_64 `testq %r12, %r12; cmovne; xorl $1, %r12d; orq $-0x1c, %r12; shlq $0x38, %r12` on a Bool loaded with `movzbl`. Tag words computed from a compare or from bit 0 of a value are found (see above). In one x86_64 app (a 40 MB slice), 67 of 110 computed tag words are found; 11 of the 43 others have this shape, and for 32 the cause is not determined (most have no string found after them in their function).
 - Words that reach their use through memory the data flow does not track: a heap object passed to another function before the store, and code reached only through a jump table (Ghidra's block model gives those blocks no predecessor).
 - Switches over an enum without payloads that `-O` compiles to a table of byte offsets (`and x8, x0, #0xff; ldrb; add lsl 2; br`, arm64): Ghidra 12.2 does not recover the table (12.1.4 did, but read all 256 entries the mask allows, which gave false strings), so the cases after the branch are not in the function. In the fixture 29 of 30 literals are missed; on one arm64 app, 54 strings in 4 functions.
 - More than 16 values meeting at one point (`ValueFlow.MAX_VALUES`): the merge keeps none of them, so a switch whose cases jump to one shared tail loses all its strings. Not seen; on one arm64 app limits 32 and 64 found no string that 16 missed.
@@ -424,7 +429,7 @@ The analyzer is checked against a fixture with known answers (`fixtures/Strings.
 
 Known display limits:
 
-- The Swift demangler types word 0 of a `String` argument as `char *`, so the decompiler prints a short string's word 0 as the bytes at that address (`"\x19"` for `"-"` = 0x2d). The `.hi` equate on the same string still shows.
+- With word 0 as `ulonglong` the decompiler still shows it as a pointer when its value lies inside a defined string (`(ulonglong)"utoreleasedReturnValue"` for `"Cb"` = 0x6243 in the x86_64 fixture): it makes such a constant a `char *` and then prints the string, not the equate. These strings get the PRE comment line; the `.hi` equate still shows.
 - Word 1 of a string of 8 bytes or fewer holds only the tag and the count, so all strings of the same length share it (`0xE100…` for every one-byte string). Where two such strings meet in one function, the `.hi` name can name the other one (`S" ".hi` for `"-"`). The comment lines and bookmarks are not affected.
 - Code that the decompiler removes as unreachable shows neither equates nor comments.
 - Probable and large strings, and strings passed to methods whose demangled signature has no parameters (`_bridgeToObjectiveC(void)`), show as PRE comments, not equates.
@@ -433,7 +438,7 @@ Known display limits:
 
 `ghidra_scripts/` (add the directory in the Script Manager, or `-scriptPath` headless):
 
-- `DumpSwiftStrings.java <output> [<C directory>]` writes the markup (bookmarks, comments, equates) and, per string, whether the decompiled C shows it, to a text file. With a `swift_strings` block it also writes the block's strings and their references (`BLOCK` lines) and the small strings whose reference is missing or extra (`BLOCKREF-MISSING`, `BLOCKREF-EXTRA`).
+- `DumpSwiftStrings.java <output> [<C directory>]` writes the markup (bookmarks, comments, equates) and, per string, whether the decompiled C shows it and whether it shows word 0 of a small string as an address (`DECOMP` lines), to a text file. For each large string it writes the references from its function to its bytes (`LARGEREF`) and the references to the bytes less 32 (`LARGEREF-WRONG`, the value word 1 is built from). With a `swift_strings` block it also writes the block's strings and their references (`BLOCK` lines) and the small strings whose reference is missing or extra (`BLOCKREF-MISSING`, `BLOCKREF-EXTRA`).
 - `RerunSwiftStrings.java [EOL|PRE]` adds user lines to two comments and runs the analyzer again with the program's analysis options, for the idempotency test.
 
 `fixtures/` has the test program `Strings.swift`, its expected literals (`expected-strings.txt`) and `check_report.py`. `make -C fixtures` builds it for arm64 (`-O` and `-Onone`) and x86_64 (`-O`) with `swiftc`. The x86_64 build needs no Rosetta: Ghidra only reads it. `devtools/headless.sh` and `devtools/run-fixtures.sh` run it headless.

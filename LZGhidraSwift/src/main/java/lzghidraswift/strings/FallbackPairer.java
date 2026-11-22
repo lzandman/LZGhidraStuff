@@ -116,7 +116,10 @@ public final class FallbackPairer {
 			List<Constant> constants, Set<Constant> intermediate) {
 		Map<String, Constant> partners = new LinkedHashMap<>();
 		for (Constant c : constants) {
-			if (c.at().equals(tag.at()) || !block.contains(c.at()) || intermediate.contains(c)) {
+			// Word 0 is a whole register: x86 xorl %eax, %eax also sets ZF to the constant 1,
+			// which with the tag word 0xE1... decoded as "\x01".
+			if (c.at().equals(tag.at()) || c.register().getSize() != 8 || !block.contains(c.at()) ||
+				intermediate.contains(c)) {
 				continue;
 			}
 			String s = SwiftStringCodec.decodeSmall(c.value(), tag.value());

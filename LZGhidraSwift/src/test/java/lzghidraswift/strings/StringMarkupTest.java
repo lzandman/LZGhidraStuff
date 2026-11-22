@@ -5,10 +5,15 @@ package lzghidraswift.strings;
 
 import static org.junit.Assert.*;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import org.junit.Test;
 
+import ghidra.program.model.pcode.PcodeOp;
+import ghidra.program.model.pcode.Varnode;
+import ghidra.program.model.symbol.SourceType;
+import lzghidraswift.flow.PcodeFixtures;
 import lzghidraswift.strings.StringHit.Kind;
 import lzghidraswift.strings.StringHit.Method;
 
@@ -16,6 +21,64 @@ public class StringMarkupTest {
 
 	private static StringHit hit(Kind kind, String text, Method method) {
 		return new StringHit(kind, text, null, null, null, method, 0, 0);
+	}
+
+	@Test
+	public void deletableReferences() {
+		assertTrue(StringMarkup.isDeletable(SourceType.ANALYSIS, 1));
+		assertTrue(StringMarkup.isDeletable(SourceType.DEFAULT, 0));
+		assertFalse(StringMarkup.isDeletable(SourceType.USER_DEFINED, 1));
+		assertFalse(StringMarkup.isDeletable(SourceType.IMPORTED, 1));
+		// The analyzer's own reference is a mnemonic one.
+		assertFalse(StringMarkup.isDeletable(SourceType.ANALYSIS, -1));
+	}
+
+	// x86-64 register offsets of Ghidra 12.2.
+	private static final Varnode RAX = PcodeFixtures.reg(0x0, 8);
+	private static final Varnode RCX = PcodeFixtures.reg(0x8, 8);
+	private static final Varnode RSI = PcodeFixtures.reg(0x30, 8);
+
+	private static PcodeOp op(int opcode, Varnode out, Varnode... in) {
+		return PcodeFixtures.op(opcode, out, in);
+	}
+
+	private static Varnode constant(long value) {
+		return PcodeFixtures.constant(value, 8);
+	}
+
+	@Test
+	public void traceWritersFollowsCmovToBothValues() {
+		// cmove rcx, rax: the write is conditional, so rcx (the other lea) stays needed.
+		Varnode tmp = PcodeFixtures.unique(0x100, 8);
+		PcodeOp[] cmov = { op(PcodeOp.COPY, tmp, RAX),
+			op(PcodeOp.CBRANCH, null, constant(0), PcodeFixtures.ZF),
+			op(PcodeOp.COPY, RCX, tmp) };
+		List<Varnode> needed = new ArrayList<>(List.of(RCX));
+		assertTrue(StringMarkup.traceWriters(cmov, needed));
+		assertEquals(List.of(RCX, RAX), needed);
+		// lea rcx, [rip + x]: a constant, so nothing is left of rcx.
+		assertTrue(StringMarkup.traceWriters(
+			new PcodeOp[] { op(PcodeOp.COPY, RCX, constant(0x1018663f0L)) }, needed));
+		assertEquals(List.of(RAX), needed);
+	}
+
+	@Test
+	public void traceWritersFollowsAddAndStopsAtLoad() {
+		// add rsi, -0x20 keeps rsi needed for the lea before it.
+		List<Varnode> needed = new ArrayList<>(List.of(RSI));
+		assertTrue(StringMarkup.traceWriters(
+			new PcodeOp[] { op(PcodeOp.INT_ADD, RSI, RSI, constant(-0x20)) }, needed));
+		assertEquals(List.of(RSI), needed);
+		// mov rsi, [rax]: the value comes from memory, rax is not followed.
+		assertTrue(StringMarkup.traceWriters(
+			new PcodeOp[] { op(PcodeOp.LOAD, RSI, PcodeFixtures.SPACE, RAX) },
+			needed));
+		assertTrue(needed.isEmpty());
+		// An instruction that writes another register is not one of the string's.
+		needed.add(RSI);
+		assertFalse(StringMarkup.traceWriters(
+			new PcodeOp[] { op(PcodeOp.COPY, RCX, constant(1)) }, needed));
+		assertEquals(List.of(RSI), needed);
 	}
 
 	@Test

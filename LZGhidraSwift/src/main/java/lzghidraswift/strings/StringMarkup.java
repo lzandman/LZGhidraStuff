@@ -6,10 +6,10 @@ package lzghidraswift.strings;
 import java.util.*;
 import java.util.regex.Pattern;
 
-import ghidra.program.model.address.Address;
-import ghidra.program.model.address.AddressIterator;
-import ghidra.program.model.address.AddressSetView;
+import ghidra.program.model.address.*;
 import ghidra.program.model.listing.*;
+import ghidra.program.model.pcode.PcodeOp;
+import ghidra.program.model.pcode.Varnode;
 import ghidra.program.model.scalar.Scalar;
 import ghidra.program.model.symbol.*;
 import ghidra.util.Msg;
@@ -23,8 +23,10 @@ import lzghidraswift.strings.StringHit.Kind;
  * Puts the strings found in a function into the listing: a comment line {@code Swift "text"} and
  * a bookmark at the instruction that completes each string, an equate on each instruction
  * operand whose scalar is a whole word of a small string ({@code movabs} on x86_64, a single
- * {@code mov} on AArch64), and a data reference to the bytes of a large string if the function
- * has none. {@link DecompilerEquates} adds equates on decompiler constants, and
+ * {@code mov} on AArch64), and a data reference to the bytes of a large string if its own
+ * instructions have none (Ghidra's references from them to the bytes less 32 are deleted, and
+ * those from the producer of a small string's word 0 to the address that is its value).
+ * {@link DecompilerEquates} adds equates on decompiler constants, and
  * {@link #addPreLines} a PRE comment line for strings the decompiler does not show. With the
  * string block option, small strings also go into {@link StringBlock}, written by
  * {@link #writeBlock} at the end of the run. Re-running replaces this markup and leaves the rest
@@ -63,14 +65,16 @@ public final class StringMarkup {
 	}
 
 	/** What one call of {@link #apply} created. */
-	public record Counts(int comments, int bookmarks, int equates, int refsAdded, int refsPresent) {
+	public record Counts(int comments, int bookmarks, int equates, int refsAdded, int refsPresent,
+			int refsDeleted, int wordRefsDeleted) {
 		public Counts plus(Counts o) {
 			return new Counts(comments + o.comments, bookmarks + o.bookmarks, equates + o.equates,
-				refsAdded + o.refsAdded, refsPresent + o.refsPresent);
+				refsAdded + o.refsAdded, refsPresent + o.refsPresent, refsDeleted + o.refsDeleted,
+				wordRefsDeleted + o.wordRefsDeleted);
 		}
 	}
 
-	public static final Counts NONE = new Counts(0, 0, 0, 0, 0);
+	public static final Counts NONE = new Counts(0, 0, 0, 0, 0, 0, 0);
 
 	private final Program program;
 	private final Options options;
@@ -108,9 +112,17 @@ public final class StringMarkup {
 		return "S" + SwiftStringCodec.quote(text);
 	}
 
+	/** The suffix of {@link #equateNameHi}. */
+	private static final String HI_SUFFIX = ".hi";
+
 	/** The equate name of word 1 (the tag word): {@code S"Flat".hi}. */
 	static String equateNameHi(String text) {
-		return equateName(text) + ".hi";
+		return equateName(text) + HI_SUFFIX;
+	}
+
+	/** True for an equate name of {@link #equateNameHi}, false for one of word 0. */
+	static boolean isEquateNameHi(String name) {
+		return name.endsWith(HI_SUFFIX);
 	}
 
 	static boolean isOwnEquate(String name) {
@@ -236,22 +248,40 @@ public final class StringMarkup {
 		int equates = 0;
 		int refsAdded = 0;
 		int refsPresent = 0;
+		int refsDeleted = 0;
+		int wordRefsDeleted = 0;
+		List<StringHit> large = new ArrayList<>();
 		for (StringHit h : marked) {
 			if (h.kind() == Kind.SMALL) {
 				equates += equates(h);
+				wordRefsDeleted += deleteWordReferences(h);
 				if (block != null) {
 					block.add(h.completedAt(), h.text());
 				}
-				continue;
 			}
-			switch (reference(function, h)) {
-				case 1 -> refsAdded++;
-				case 0 -> refsPresent++;
-				default -> {
-				}
+			else if (h.word1At() != null) {
+				large.add(h);
 			}
 		}
-		return new Counts(comments, bookmarks, equates, refsAdded, refsPresent);
+		// First delete the wrong references of every large hit, then add the missing ones: when
+		// hits share their instructions, one reference can be the bytes of one hit and the bytes
+		// less 32 of another (four literals selected by a switch before one OR).
+		List<Set<Address>> own = new ArrayList<>();
+		for (StringHit h : large) {
+			Set<Address> o = ownInstructions(function, h);
+			own.add(o);
+			refsDeleted += deleteWrongReferences(h, o);
+		}
+		for (int i = 0; i < large.size(); i++) {
+			if (addReference(large.get(i), own.get(i))) {
+				refsAdded++;
+			}
+			else {
+				refsPresent++;
+			}
+		}
+		return new Counts(comments, bookmarks, equates, refsAdded, refsPresent, refsDeleted,
+			wordRefsDeleted);
 	}
 
 	/**
@@ -409,26 +439,218 @@ public final class StringMarkup {
 		return -1;
 	}
 
+	/** The address of a large string's bytes. */
+	private Address bytesOf(StringHit h) {
+		return biasedOf(h).add(SwiftStringCodec.NATIVE_BIAS);
+	}
+
+	/** The address of a large string's bytes less 32: word 1 without the flag. */
+	private Address biasedOf(StringHit h) {
+		return program.getAddressFactory()
+				.getDefaultAddressSpace()
+				.getAddress(h.word1() & ~SwiftStringCodec.LARGE_OBJECT_FLAG);
+	}
+
 	/**
-	 * Adds a data reference from the instruction that produced word 1 of a large string to its
-	 * bytes, if no instruction of the function refers to them yet. Returns 1 if added, 0 if one
-	 * was present, -1 if neither was possible.
+	 * Deletes Ghidra's operand references from the producer of word 0 of a certain small string
+	 * to the address that its value happens to be ({@code mov edi,0x6243} into the middle of a
+	 * symbol name). The reference makes a {@code DAT_} label there, and the decompiler then shows
+	 * word 0 as a pointer to it instead of the equate. Returns the number deleted.
 	 */
-	private int reference(Function function, StringHit h) {
-		if (h.word1At() == null) {
-			return -1;
+	private int deleteWordReferences(StringHit h) {
+		if (h.method().probable() || h.word0At() == null || h.word0() == 0) {
+			return 0;
 		}
-		long offset =
-			(h.word1() & ~SwiftStringCodec.LARGE_OBJECT_FLAG) + SwiftStringCodec.NATIVE_BIAS;
-		Address str = program.getAddressFactory().getDefaultAddressSpace().getAddress(offset);
 		ReferenceManager rm = program.getReferenceManager();
-		for (Reference r : rm.getReferencesTo(str)) {
-			if (function.getBody().contains(r.getFromAddress())) {
-				return 0;
+		int deleted = 0;
+		for (Reference r : rm.getReferencesFrom(h.word0At())) {
+			if (r.isMemoryReference() && r.getToAddress().getOffset() == h.word0() &&
+				isDeletable(r)) {
+				rm.delete(r);
+				deleted++;
+			}
+		}
+		return deleted;
+	}
+
+	/**
+	 * Deletes the references from a large string's own instructions ({@link #ownInstructions})
+	 * to its bytes less 32, which Ghidra adds to the {@code lea} that loads the value of word 1.
+	 * Returns the number deleted.
+	 */
+	private int deleteWrongReferences(StringHit h, Set<Address> own) {
+		Address wrong = biasedOf(h);
+		ReferenceManager rm = program.getReferenceManager();
+		int deleted = 0;
+		for (Address a : own) {
+			for (Reference r : rm.getReferencesFrom(a)) {
+				if (r.getToAddress().equals(wrong) && isDeletable(r)) {
+					rm.delete(r);
+					deleted++;
+				}
+			}
+		}
+		return deleted;
+	}
+
+	/**
+	 * Adds a data reference from the producer of word 1 of a large string to its bytes, unless
+	 * one of its own instructions refers to them already (on x86_64 the {@code lea} when the
+	 * compiler subtracts 32 in a separate {@code add}). References from other instructions do not
+	 * count: the {@code lea} of the next literal, packed 32 bytes after this one, refers to this
+	 * one's bytes. Returns true if added.
+	 */
+	private boolean addReference(StringHit h, Set<Address> own) {
+		Address str = bytesOf(h);
+		ReferenceManager rm = program.getReferenceManager();
+		for (Address a : own) {
+			for (Reference r : rm.getReferencesFrom(a)) {
+				if (r.getToAddress().equals(str)) {
+					return false;
+				}
 			}
 		}
 		rm.addMemoryReference(h.word1At(), str, RefType.DATA, SourceType.ANALYSIS,
 			Reference.MNEMONIC);
-		return 1;
+		return true;
+	}
+
+	/** How many instructions {@link #ownInstructions} walks back on each path from word 1. */
+	static final int WRITER_WINDOW = 8;
+
+	/** How many instructions {@link #ownInstructions} visits at most, over all paths. */
+	static final int WALK_LIMIT = 64;
+
+	/** One instruction of the backward walk, with the varnodes whose writers are still open. */
+	private record Step(Instruction instr, List<Varnode> needed, int depth) {}
+
+	/**
+	 * The instructions of a large string: its two producers, its use site, and the writers of
+	 * the value that word 1 is built from. From the producer of word 1 it walks back through the
+	 * function (fall-through and jumps, so the {@code lea} of each case before a shared OR is
+	 * found), up to {@link #WRITER_WINDOW} instructions on each path, following the register
+	 * inputs of its {@code INT_OR} through the instructions that write them
+	 * ({@link #traceWriters}: {@code cmov}, {@code add}, {@code mov}).
+	 */
+	private Set<Address> ownInstructions(Function function, StringHit h) {
+		Set<Address> own = new LinkedHashSet<>();
+		for (Address a : new Address[] { h.word0At(), h.word1At(), h.useAt() }) {
+			if (a != null) {
+				own.add(a);
+			}
+		}
+		Instruction or = program.getListing().getInstructionAt(h.word1At());
+		if (or == null) {
+			return own;
+		}
+		List<Varnode> inputs = orRegisterInputs(or);
+		Deque<Step> todo = new ArrayDeque<>();
+		for (Instruction p : predecessors(function, or)) {
+			todo.add(new Step(p, inputs, 1));
+		}
+		Set<Address> seen = new HashSet<>();
+		while (!todo.isEmpty() && seen.size() < WALK_LIMIT) {
+			Step s = todo.poll();
+			if (!seen.add(s.instr().getAddress())) {
+				continue;
+			}
+			List<Varnode> needed = new ArrayList<>(s.needed());
+			if (traceWriters(s.instr().getPcode(), needed)) {
+				own.add(s.instr().getAddress());
+			}
+			if (needed.isEmpty() || s.depth() >= WRITER_WINDOW) {
+				continue;
+			}
+			for (Instruction p : predecessors(function, s.instr())) {
+				todo.add(new Step(p, needed, s.depth() + 1));
+			}
+		}
+		return own;
+	}
+
+	/** The register inputs of the {@code INT_OR} ops of {@code instr}. */
+	private static List<Varnode> orRegisterInputs(Instruction instr) {
+		List<Varnode> inputs = new ArrayList<>();
+		for (PcodeOp op : instr.getPcode()) {
+			if (op.getOpcode() == PcodeOp.INT_OR) {
+				for (Varnode in : op.getInputs()) {
+					if (in.isRegister()) {
+						inputs.add(in);
+					}
+				}
+			}
+		}
+		return inputs;
+	}
+
+	/** The instructions of {@code function} that fall through or jump to {@code instr}. */
+	private List<Instruction> predecessors(Function function, Instruction instr) {
+		Listing listing = program.getListing();
+		List<Address> froms = new ArrayList<>();
+		if (instr.getFallFrom() != null) {
+			froms.add(instr.getFallFrom());
+		}
+		for (Reference r : program.getReferenceManager().getReferencesTo(instr.getAddress())) {
+			if (r.getReferenceType().isJump()) {
+				froms.add(r.getFromAddress());
+			}
+		}
+		List<Instruction> preds = new ArrayList<>();
+		for (Address a : froms) {
+			Instruction p = listing.getInstructionAt(a);
+			if (p != null && function.getBody().contains(a)) {
+				preds.add(p);
+			}
+		}
+		return preds;
+	}
+
+	/**
+	 * Follows {@code needed} (register varnodes) back through one instruction's p-code: each op
+	 * that writes one of them replaces it by its register inputs (through uniques), except a
+	 * LOAD, whose value comes from memory. In an instruction with a CBRANCH ({@code cmov}) the
+	 * write is conditional, so the register stays needed: its earlier writer is the other value.
+	 * Returns true if the instruction writes one of the registers.
+	 */
+	static boolean traceWriters(PcodeOp[] ops, List<Varnode> needed) {
+		boolean conditional = false;
+		for (PcodeOp op : ops) {
+			conditional |= op.getOpcode() == PcodeOp.CBRANCH;
+		}
+		boolean wrote = false;
+		for (int i = ops.length - 1; i >= 0; i--) {
+			PcodeOp op = ops[i];
+			Varnode out = op.getOutput();
+			if (out == null || needed.stream().noneMatch(n -> n.intersects(out))) {
+				continue;
+			}
+			wrote |= out.isRegister();
+			if (!conditional || out.isUnique()) {
+				needed.removeIf(n -> n.intersects(out));
+			}
+			if (op.getOpcode() == PcodeOp.LOAD) {
+				continue;
+			}
+			for (Varnode in : op.getInputs()) {
+				if ((in.isRegister() || in.isUnique()) && !needed.contains(in)) {
+					needed.add(in);
+				}
+			}
+		}
+		needed.removeIf(Varnode::isUnique);
+		return wrote;
+	}
+
+	/**
+	 * True for a reference that {@link #deleteWrongReferences} and {@link #deleteWordReferences}
+	 * may delete: an operand reference that Ghidra's analysis made, not one of the user's or a
+	 * mnemonic one (the analyzer's own).
+	 */
+	static boolean isDeletable(SourceType source, int operandIndex) {
+		return operandIndex >= 0 && (source == SourceType.DEFAULT || source == SourceType.ANALYSIS);
+	}
+
+	private static boolean isDeletable(Reference r) {
+		return isDeletable(r.getSource(), r.getOperandIndex());
 	}
 }
