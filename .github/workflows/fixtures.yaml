@@ -1,7 +1,9 @@
 # Runs LZGhidraSwift's fixture integration test (LZGhidraSwift/devtools/test-fixtures.sh) on a macOS
 # runner: compiles the Swift fixtures, analyses them with headless Ghidra and the extension, and checks
-# the results. Runs only when started by hand (Actions tab, or `gh workflow run fixtures.yaml`): a macOS
-# runner costs more than a Linux one, and release.yaml does not call it.
+# the results. A macOS runner costs more than a Linux one, so pushes and pull requests do not run it.
+# Started by hand (Actions tab, or `gh workflow run fixtures.yaml`), it builds its own extension zip from
+# the checkout. release.yaml calls it after build.yaml with build-zip: true; then it tests the
+# LZGhidraSwift zip that build.yaml uploaded in the same run, the zip that release.yaml packages.
 # The runner: GitHub's xcode-27 label (arm64, 3 M1 cores, 7 GB RAM, 14 GB SSD), so that the fixtures
 # are compiled with the Xcode major version the known differences were recorded with
 # (fixtures/known-differences/, Xcode 27.0); the job prints the exact versions. macos-26 has Xcode 26.
@@ -11,6 +13,13 @@ name: Swift fixture test (macOS)
 
 on:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      # In a called workflow github.event_name is the caller's event, so an input marks the call.
+      build-zip:
+        description: Test the zip of build.yaml from this workflow run instead of building one
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -83,8 +92,29 @@ jobs:
           echo "== java"; java -version 2>&1
           echo "== /usr/bin/swift"; /usr/bin/swift --version 2>&1
 
+      - uses: actions/download-artifact@v8
+        if: inputs.build-zip
+        with:
+          name: extensions-ghidra-${{ matrix.ghidra }}
+          path: ${{ runner.temp }}/built
+
+      - name: Find the zip of build.yaml
+        if: inputs.build-zip
+        run: |
+          find "$RUNNER_TEMP/built" -name '*_LZGhidraSwift.zip' > "$RUNNER_TEMP/zips.txt"
+          if [ "$(wc -l < "$RUNNER_TEMP/zips.txt")" -ne 1 ]; then
+            echo "expected exactly one *_LZGhidraSwift.zip in the build artifact, found:" >&2
+            cat "$RUNNER_TEMP/zips.txt" >&2
+            exit 1
+          fi
+          zip=$(cat "$RUNNER_TEMP/zips.txt")
+          basename "$zip"
+          sha256sum "$zip"
+          echo "FIXTURE_ZIP=$zip" >> "$GITHUB_ENV"
+
+      # With no zip given, test-fixtures.sh builds one (== gradle buildExtension in the log).
       - name: Run test-fixtures.sh
-        run: LZGhidraSwift/devtools/test-fixtures.sh
+        run: LZGhidraSwift/devtools/test-fixtures.sh ${FIXTURE_ZIP:+"$FIXTURE_ZIP"}
 
       # The logs, dumps and checker output, also when a check fails.
       - uses: actions/upload-artifact@v7
