@@ -396,7 +396,7 @@ This is a workaround with side effects, which is why it is off by default:
 - Search → For Strings lists the block's strings only with "All Blocks" and a minimum length low enough (the dialog's defaults, Loaded Blocks and 5, hide them).
 - The Binary exporter writes it, because it writes every initialized block. The Original File exporter does not.
 - A text that is also a defined string elsewhere in the program (a Swift field name in `__swift5_reflstr`, a C string in `__cstring`) shows twice in the window. Only the block's copy has the references to the code that builds the string.
-- If the Defined Strings window was open during the analysis, it may not show the new strings until you press its Refresh button (highlighted when its list may be stale). Ghidra stops updating the window row by row when data types change, which they do throughout auto-analysis.
+- If the Defined Strings window is open during the analysis, it does not show the new strings until you press its Refresh button. The button's arrows then turn from grey to green. Creating or extending a memory block sends Ghidra's `RESTORED` event; the window then marks its list as stale and skips the other changes of the same batch, the new strings among them.
 - Creating the block needs exclusive access: in a shared project, check the program out exclusively. Without it the analyzer logs `SWIFTSTR-BLOCK-LOCKED` and does the rest of its markup without the block.
 
 The block only grows. A later run (more functions, One Shot on a selection) appends the new texts and joins them to the block, so the strings already there keep their addresses and references. A string whose last reference disappears stays in the block. Empty strings and strings with a NUL inside are left out.
